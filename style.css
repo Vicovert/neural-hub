@@ -11,9 +11,21 @@ body, html {
 
 #3d-graph {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
   z-index: 1;
   background: radial-gradient(circle at 50% 50%, #08142c 0%, #030712 75%);
+  transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Quand le HUD projet est ouvert sur grand écran, la zone 3D se réduit à l'espace libre à gauche */
+@media (min-width: 900px) {
+  body.hud-open #3d-graph {
+    width: calc(100vw - 556px);
+  }
 }
 
 .glass {
