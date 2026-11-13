@@ -823,18 +823,27 @@ async function detectLocalOllama() {
 
 function sanitizeJsonResponse(raw) {
   let cleaned = (raw || "").trim();
+  // Supprime les blocs de pensée internes (type DeepSeek / R1)
   cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-
+  
+  // Extrait le contenu entre la première accolade ouvrante et la dernière fermante
   const firstBrace = cleaned.indexOf("{");
   const lastBrace = cleaned.lastIndexOf("}");
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
     cleaned = cleaned.slice(firstBrace, lastBrace + 1);
   }
 
+  // Nettoie les retours à la ligne non échappés dans les chaînes JSON si nécessaire
   try {
     return JSON.parse(cleaned);
   } catch (err) {
-    throw new Error(`Réponse JSON invalide ou tronquée. Détail : ${err.message}`);
+    // Tentative de correction agressive des sauts de ligne littéraux dans les valeurs string
+    try {
+      const fixed = cleaned.replace(/[\u0000-\u001F]+/g, " ");
+      return JSON.parse(fixed);
+    } catch (e2) {
+      throw new Error(`Erreur JSON : ${err.message}. Réponse brute reçue de l'agent malformée.`);
+    }
   }
 }
 
@@ -1228,6 +1237,7 @@ async function proposeCodeChanges() {
   try {
     const context = await gatherSelectedContext(currentRepo, true);
     const sys = `Tu es un ingénieur logiciel autonome (style Antigravity / Claude Code).
+Pour chaque fichier à modifier, crée une opération de type "patch" ou "create" dans le tableau "operations". Ne t'arrête pas au premier point, traite l'ensemble de la liste fournie.
 Pour modifier un fichier EXISTANT, utilise UNIQUEMENT action: "patch" avec une liste "hunks" contenant des paires { "search": "extrait exact de 3 à 15 lignes du fichier existant", "replace": "nouveau code remplaçant cet extrait" }.
 RÈGLES STRICTES :
 1. Ne réécris JAMAIS un fichier existant en entier : utilise toujours "patch" avec le code exact copié caractère pour caractère dans "search" (indentation comprise).
