@@ -62,15 +62,17 @@
         Recentre
       </button>
     </div>
-
-    <select id="agent-selector" class="bg-slate-900 text-xs text-cyan-300 border border-cyan-500/30 rounded px-2.5 py-1 focus:outline-none">
-        <option value="gemini:gemini-4-argon">Gemini 4 Argon (Code & Agentique / Rapide)</option>
-        <option value="gemini:gemini-4-carbon">Gemini 4 Carbon (Génie Logiciel Complexe)</option>
-        <option value="gemini:gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
-        <option value="groq:llama-3.3-70b-versatile">Groq — Llama 3.3 70B</option>
-        <option value="groq:qwen/qwen3-32b">Groq — Qwen 3 32B</option>
-        <option id="ollama-opt" value="ollama:deepseek-r1:32b" disabled>Ollama Local (Non détecté)</option>
-      </select>
+    
+    <div class="glass px-3.5 py-2 rounded-xl flex flex-wrap items-center gap-2.5 pointer-events-auto">
+      <label class="text-xs text-slate-400">Agent :</label>
+      <select id="agent-selector" class="bg-slate-900 text-xs text-cyan-300 border border-cyan-500/30 rounded px-2.5 py-1 focus:outline-none">
+          <option value="gemini:gemini-4-argon">Gemini 4 Argon (Code & Agentique / Rapide)</option>
+          <option value="gemini:gemini-4-carbon">Gemini 4 Carbon (Génie Logiciel Complexe)</option>
+          <option value="gemini:gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+          <option value="groq:llama-3.3-70b-versatile">Groq — Llama 3.3 70B</option>
+          <option value="groq:qwen/qwen3-32b">Groq — Qwen 3 32B</option>
+          <option id="ollama-opt" value="ollama:deepseek-r1:32b" disabled>Ollama Local (Non détecté)</option>
+        </select>
 
       <button onclick="toggleNewProjectDrawer()" class="text-xs bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-3 py-1.5 rounded-lg shadow transition">
         + Nouveau Projet par Prompt
