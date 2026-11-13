@@ -1,6 +1,9 @@
 // ============================================================================
 // NEURAL DEV HUB V6.0 — ARCHITECTURE AGENTIQUE ZÉRO JSON & AUTO-HEAL CI/CD
+// Modèles mis à jour : gemini-3.5-flash-lite (Routing) & gemini-3.8-flash / gemini-4-* (Code)
 // ============================================================================
+
+const BASE_ROUTING_MODEL = "gemini-3.5-flash-lite";
 
 let graph3D = null;
 let repositories = [];
@@ -9,6 +12,7 @@ let currentRepo = null;
 let currentRepoTree = [];
 let currentRepoIsEmpty = false;
 let currentFileCache = {};
+let autoSelectedPaths = [];
 let stagedChanges = null;
 let grantedScopes = "";
 let lastAuditImprovements = [];
@@ -27,17 +31,24 @@ const IGNORED_PATHS = [
 ];
 
 // ============================================================================
-// 1. GESTION DES CLÉS (SESSION OU LOCAL) & ENCODAGE UTF-8 STRICT
+// 1. GESTION DU MODE PC (PRINCIPAL vs TEMPORAIRE) & ENCODAGE UTF-8 STRICT
 // ============================================================================
+function hasConfiguredStorageMode() {
+  return localStorage.getItem("ndh_storage_mode") !== null || sessionStorage.getItem("ndh_storage_mode") !== null;
+}
+
+function getStorageMode() {
+  return sessionStorage.getItem("ndh_storage_mode") || localStorage.getItem("ndh_storage_mode") || "session";
+}
+
 function getStore() {
-  const mode = localStorage.getItem("ndh_storage_mode") || "session";
-  return mode === "local" ? localStorage : sessionStorage;
+  return getStorageMode() === "local" ? localStorage : sessionStorage;
 }
 
 function getCreds() {
   const s = getStore();
   return {
-    mode: localStorage.getItem("ndh_storage_mode") || "session",
+    mode: getStorageMode(),
     owner: (s.getItem("ndh_owner") || "").trim(),
     githubToken: (s.getItem("ndh_gh_token") || "").trim(),
     geminiKey: (s.getItem("ndh_gemini_key") || "").trim(),
@@ -45,18 +56,45 @@ function getCreds() {
   };
 }
 
+function selectStorageModeCard(mode) {
+  document.getElementById("cfg-storage-mode").value = mode;
+  const localCard = document.getElementById("card-mode-local");
+  const sessionCard = document.getElementById("card-mode-session");
+
+  if (mode === "local") {
+    localCard.className = "text-left p-3.5 rounded-xl border-2 border-cyan-400 bg-cyan-950/40 transition space-y-1";
+    sessionCard.className = "text-left p-3.5 rounded-xl border-2 border-slate-700 bg-slate-900/70 hover:border-slate-500 transition space-y-1";
+  } else {
+    sessionCard.className = "text-left p-3.5 rounded-xl border-2 border-amber-400 bg-amber-950/40 transition space-y-1";
+    localCard.className = "text-left p-3.5 rounded-xl border-2 border-slate-700 bg-slate-900/70 hover:border-slate-500 transition space-y-1";
+  }
+}
+
+function updateStorageModeBadge() {
+  const mode = getStorageMode();
+  const ind = document.getElementById("storage-mode-indicator");
+  if (!ind) return;
+  ind.textContent = mode === "local" ? "💻 PC Principal (Clés sauvées)" : "🕵️ PC Temporaire (Session)";
+}
+
 function saveCredentials() {
   const mode = document.getElementById("cfg-storage-mode").value;
-  localStorage.setItem("ndh_storage_mode", mode);
-  const otherStore = mode === "local" ? sessionStorage : localStorage;
-  ["ndh_owner", "ndh_gh_token", "ndh_gemini_key", "ndh_groq_key"].forEach(k => otherStore.removeItem(k));
+  if (mode === "local") {
+    sessionStorage.clear();
+    localStorage.setItem("ndh_storage_mode", "local");
+  } else {
+    ["ndh_owner", "ndh_gh_token", "ndh_gemini_key", "ndh_groq_key", "ndh_storage_mode"].forEach(k => localStorage.removeItem(k));
+    sessionStorage.setItem("ndh_storage_mode", "session");
+  }
 
   const s = mode === "local" ? localStorage : sessionStorage;
   s.setItem("ndh_owner", document.getElementById("cfg-owner").value.trim());
   s.setItem("ndh_gh_token", document.getElementById("cfg-github-token").value.trim());
   s.setItem("ndh_gemini_key", document.getElementById("cfg-gemini-key").value.trim());
   s.setItem("ndh_groq_key", document.getElementById("cfg-groq-key").value.trim());
-  document.getElementById("settings-drawer").classList.add("hidden");
+
+  updateStorageModeBadge();
+  closeFirstRunModal();
   loadAllRepositories();
 }
 
@@ -65,6 +103,19 @@ function clearCredentials() {
   ["ndh_owner", "ndh_gh_token", "ndh_gemini_key", "ndh_groq_key", "ndh_storage_mode"].forEach(k => localStorage.removeItem(k));
   alert("Toutes les clés ont été purgées de ce navigateur.");
   location.reload();
+}
+
+function toggleSettingsDrawer() {
+  const modal = document.getElementById("first-run-modal");
+  modal.classList.toggle("hidden");
+}
+
+function closeFirstRunModal() {
+  document.getElementById("first-run-modal").classList.add("hidden");
+}
+
+function toggleNewProjectDrawer() {
+  document.getElementById("new-project-drawer").classList.toggle("hidden");
 }
 
 function b64DecodeUtf8(b64) {
@@ -90,21 +141,8 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;");
 }
 
-function toggleSettingsDrawer() {
-  document.getElementById("settings-drawer").classList.toggle("hidden");
-}
-
-function toggleNewProjectDrawer() {
-  document.getElementById("new-project-drawer").classList.toggle("hidden");
-}
-
-function closeProjectHud() {
-  document.getElementById("project-hud").classList.add("hidden");
-  resetCamera();
-}
-
 function switchHudTab(tab) {
-  ["overview", "ai", "prompt", "files"].forEach(t => {
+  ["overview", "ai", "prompt"].forEach(t => {
     document.getElementById(`tab-${t}`).classList.toggle("hidden", t !== tab);
     document.getElementById(`tab-btn-${t}`).className =
       t === tab
@@ -114,22 +152,41 @@ function switchHudTab(tab) {
 }
 
 // ============================================================================
-// 2. CERVEAU 3D V6.0 — SPHÈRE DE FIBONACCI & VERROUILLAGE PIVOT CORTEX_CORE
+// 2. CERVEAU 3D V6.0 — NEURONES FIXES RESSERRÉS & CENTRAGE DYNAMIQUE AVEC HUD
 // ============================================================================
+function get3DViewportSize() {
+  const hudOpen = document.body.classList.contains("hud-open");
+  const isWide = window.innerWidth >= 900;
+  const width = hudOpen && isWide ? window.innerWidth - 556 : window.innerWidth;
+  return { width: Math.max(320, width), height: window.innerHeight };
+}
+
+function syncGraphViewportSize() {
+  if (!graph3D) return;
+  const { width, height } = get3DViewportSize();
+  graph3D.width(width);
+  graph3D.height(height);
+}
+
 function initBrain3D() {
   const elem = document.getElementById("3d-graph");
+  const initialSize = get3DViewportSize();
+
   graph3D = ForceGraph3D()(elem)
+    .width(initialSize.width)
+    .height(initialSize.height)
     .backgroundColor("rgba(0,0,0,0)")
     .showNavInfo(false)
+    .enableNodeDrag(false) // Interdiction de déplacer les projets à la souris
     .nodeRelSize(6)
     .linkWidth(l => (l.isCore ? 1.5 : 0.6))
-    .linkColor(l => (l.isCore ? "rgba(56, 189, 248, 0.45)" : "rgba(148, 163, 184, 0.16)"))
+    .linkColor(l => (l.isCore ? "rgba(56, 189, 248, 0.48)" : "rgba(148, 163, 184, 0.16)"))
     .linkDirectionalParticles(l => (l.isCore ? 2 : 1))
     .linkDirectionalParticleWidth(1.8)
     .linkDirectionalParticleSpeed(0.004)
     .nodeThreeObject(node => {
       const group = new THREE.Group();
-      const radius = node.isCore ? 13 : Math.max(5.5, Math.min(9.5, node.sizeWeight || 6.5));
+      const radius = node.isCore ? 12 : Math.max(5, Math.min(8.5, node.sizeWeight || 6));
 
       const sphereMat = new THREE.MeshPhongMaterial({
         color: node.color || "#38bdf8",
@@ -149,15 +206,15 @@ function initBrain3D() {
         wireframe: !!node.isCore
       });
       node.__haloMat = haloMat;
-      group.add(new THREE.Mesh(new THREE.SphereGeometry(radius * (node.isCore ? 1.45 : 1.32), 16, 16), haloMat));
+      group.add(new THREE.Mesh(new THREE.SphereGeometry(radius * (node.isCore ? 1.42 : 1.3), 16, 16), haloMat));
 
       const label = new SpriteText(node.name);
       label.color = node.isCore ? "#67e8f9" : "#f8fafc";
-      label.backgroundColor = "rgba(3, 7, 18, 0.72)";
-      label.padding = 1.6;
+      label.backgroundColor = "rgba(3, 7, 18, 0.74)";
+      label.padding = 1.5;
       label.borderRadius = 3;
-      label.textHeight = node.isCore ? 5.2 : 3.6;
-      label.position.y = radius + 5.5;
+      label.textHeight = node.isCore ? 4.8 : 3.3;
+      label.position.y = radius + 5.0;
       label.material.depthTest = false;
       label.renderOrder = 999;
       group.add(label);
@@ -169,8 +226,7 @@ function initBrain3D() {
         closeProjectHud();
         return;
       }
-      focusNodeLeftOfHud(node);
-      openProjectHud(node.repoData);
+      openProjectHud(node.repoData, node);
     });
 
   const scene = graph3D.scene();
@@ -181,11 +237,11 @@ function initBrain3D() {
 
   const starGeo = new THREE.BufferGeometry();
   const pts = new Float32Array(900 * 3);
-  for (let i = 0; i < pts.length; i++) pts[i] = (Math.random() - 0.5) * 950;
+  for (let i = 0; i < pts.length; i++) pts[i] = (Math.random() - 0.5) * 900;
   starGeo.setAttribute("position", new THREE.BufferAttribute(pts, 3));
   scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ size: 1.3, color: 0x38bdf8, transparent: true, opacity: 0.38 })));
 
-  // V6.0 : Verrouillage mathématique permanent du nœud CORTEX_CORE sur (0,0,0) et du pivot OrbitControls
+  // Verrouillage mathématique permanent du Cortex (0,0,0) et de la cible caméra
   graph3D.onEngineTick(() => {
     const coreNode = nodesMap.get("CORTEX_CORE");
     if (coreNode) {
@@ -209,9 +265,10 @@ function initBrain3D() {
   });
 
   window.addEventListener("resize", () => {
-    graph3D.width(window.innerWidth);
-    graph3D.height(window.innerHeight);
+    syncGraphViewportSize();
   });
+
+  resetCamera();
 }
 
 function updateNodeColor3D(repoName, hexColor) {
@@ -227,28 +284,36 @@ function updateNodeColor3D(repoName, hexColor) {
   }
 }
 
-function focusNodeLeftOfHud(node) {
-  const nx = node.x || 1;
-  const ny = node.y || 1;
-  const nz = node.z || 1;
+function focusNodeInViewport(node) {
+  const nx = node.fx ?? node.x ?? 1;
+  const ny = node.fy ?? node.y ?? 1;
+  const nz = node.fz ?? node.z ?? 1;
   lockedCameraTarget = { x: nx, y: ny, z: nz };
 
-  const dist = 95;
-  const ratio = 1 + dist / Math.hypot(nx, ny, nz);
+  const dist = 75;
+  const norm = Math.hypot(nx, ny, nz) || 1;
+  const ratio = 1 + dist / norm;
   graph3D.cameraPosition(
     { x: nx * ratio, y: ny * ratio, z: nz * ratio },
     lockedCameraTarget,
-    850
+    800
   );
 }
 
 function resetCamera() {
   lockedCameraTarget = { x: 0, y: 0, z: 0 };
-  graph3D.cameraPosition({ x: 0, y: 0, z: 280 }, { x: 0, y: 0, z: 0 }, 850);
+  graph3D.cameraPosition({ x: 0, y: 0, z: 195 }, { x: 0, y: 0, z: 0 }, 800);
+}
+
+function closeProjectHud() {
+  document.getElementById("project-hud").classList.add("hidden");
+  document.body.classList.remove("hud-open");
+  syncGraphViewportSize();
+  resetCamera();
 }
 
 // ============================================================================
-// 3. API GITHUB & SPHÈRE DE FIBONACCI AUTOUR DU CORTEX
+// 3. API GITHUB & SPHÈRE DE FIBONACCI COMPACTE (RAYON 72, COORDONNÉES FIXES)
 // ============================================================================
 async function ghFetch(endpoint, options = {}) {
   const { githubToken } = getCreds();
@@ -278,8 +343,8 @@ async function loadAllRepositories() {
   const creds = getCreds();
   const stats = document.getElementById("stats-counter");
   if (!creds.githubToken && !creds.owner) {
-    stats.textContent = "Configure tes clés en haut à droite";
-    document.getElementById("settings-drawer").classList.remove("hidden");
+    stats.textContent = "En attente de configuration...";
+    document.getElementById("first-run-modal").classList.remove("hidden");
     return;
   }
 
@@ -329,7 +394,8 @@ function buildBrainGraph(owner, repos) {
   const links = [];
   const langBuckets = {};
   const total = Math.max(1, repos.length);
-  const sphereRadius = 125;
+  // Rayon réduit à 72 (au lieu de 125) pour garder les neurones proches du Cortex
+  const sphereRadius = 72;
 
   repos.forEach((r, idx) => {
     const lang = r.language || "Autre";
@@ -341,7 +407,6 @@ function buildBrainGraph(owner, repos) {
       OpenSCAD: "#a855f7"
     };
 
-    // Sphère de Fibonacci verrouillée autour de (0,0,0)
     const phi = Math.acos(1 - 2 * (idx + 0.5) / total);
     const theta = Math.PI * (1 + Math.sqrt(5)) * (idx + 0.5);
     const fx = sphereRadius * Math.sin(phi) * Math.cos(theta);
@@ -352,11 +417,14 @@ function buildBrainGraph(owner, repos) {
       id: r.name,
       name: r.name,
       color: colorMap[lang] || "#2dd4bf",
-      sizeWeight: Math.log10((r.size || 10) + 10) * 2.5,
+      sizeWeight: Math.log10((r.size || 10) + 10) * 2.2,
       repoData: r,
       fx,
       fy,
-      fz
+      fz,
+      x: fx,
+      y: fy,
+      z: fz
     };
     nodes.push(node);
     nodesMap.set(r.name, node);
@@ -377,17 +445,27 @@ function buildBrainGraph(owner, repos) {
 }
 
 // ============================================================================
-// 4. OUVERTURE DU HUD PROJET (SANTÉ, ACTIONS, BACKUPS GIT, ARBRE GIT)
+// 4. OUVERTURE DU HUD PROJET (AVEC RECADRAGE AUTOMATIQUE DE LA ZONE 3D)
 // ============================================================================
-async function openProjectHud(repo) {
+async function openProjectHud(repo, clickedNode = null) {
   currentRepo = repo;
   currentRepoTree = [];
   currentRepoIsEmpty = false;
   currentFileCache = {};
+  autoSelectedPaths = [];
   stagedChanges = null;
 
   document.getElementById("project-hud").classList.remove("hidden");
+  document.body.classList.add("hud-open");
+  syncGraphViewportSize();
+
+  const targetNode = clickedNode || nodesMap.get(repo.name);
+  if (targetNode) {
+    focusNodeInViewport(targetNode);
+  }
+
   document.getElementById("hud-staged-box").classList.add("hidden");
+  document.getElementById("hud-auto-selected-box").classList.add("hidden");
   document.getElementById("hud-prompt-status").textContent = "";
   document.getElementById("hud-title").textContent = repo.name;
   document.getElementById("hud-desc").textContent = repo.description || `Branche : ${repo.default_branch} • Langage : ${repo.language || "N/A"}`;
@@ -759,7 +837,7 @@ async function rollbackLastCommit() {
 }
 
 // ============================================================================
-// 5. ARBORESCENCE & ROUTING AGENT V6.0 (`autoSelectFilesWithFlash`)
+// 5. ARBORESCENCE & ROUTING AUTOMATIQUE (`gemini-3.5-flash-lite`)
 // ============================================================================
 function isUsefulTextFile(filePath, size = 0) {
   const lower = filePath.toLowerCase();
@@ -769,50 +847,18 @@ function isUsefulTextFile(filePath, size = 0) {
 }
 
 async function loadRepositoryTree(repo) {
-  const treeEl = document.getElementById("hud-file-tree");
-  const ctxEl = document.getElementById("hud-context-files");
-  treeEl.innerHTML = "Lecture de l'arborescence...";
-  ctxEl.innerHTML = "";
-
+  const countBadge = document.getElementById("hud-repo-file-count");
   const res = await ghFetch(`/repos/${repo.owner.login}/${repo.name}/git/trees/${repo.default_branch}?recursive=1`);
   if (res.status === 409 || res.status === 404) {
     currentRepoIsEmpty = true;
     currentRepoTree = [];
-    treeEl.innerHTML = `<div class="text-amber-300">Dépôt vide (0 commit).</div>`;
-    ctxEl.innerHTML = `<div class="text-amber-300">Dépôt vide.</div>`;
+    if (countBadge) countBadge.textContent = "Dépôt vide";
     return;
   }
 
   const data = await res.json();
   currentRepoTree = (data.tree || []).filter(item => item.type === "blob");
-
-  treeEl.innerHTML = currentRepoTree.map(f => `
-    <div onclick="previewRepoFile('${f.path.replace(/'/g, "\\'")}')" class="cursor-pointer hover:bg-slate-800 px-2 py-1 rounded flex justify-between items-center">
-      <span class="text-slate-200 truncate">${escapeHtml(f.path)}</span>
-      <span class="text-slate-500 text-[10px]">${((f.size || 0) / 1024).toFixed(1)} Ko</span>
-    </div>
-  `).join("");
-
-  // En V6.0, aucune case n'est cochée par défaut pour laisser autoSelectFilesWithFlash travailler tout seul
-  ctxEl.innerHTML = currentRepoTree.map(f => `
-    <label class="flex items-center gap-2 cursor-pointer hover:bg-slate-900 px-1.5 py-0.5 rounded">
-      <input type="checkbox" class="ctx-file-cb" value="${escapeHtml(f.path)}" />
-      <span class="truncate text-slate-300">${escapeHtml(f.path)}</span>
-      <span class="ml-auto text-[10px] text-slate-500">${((f.size || 0) / 1024).toFixed(1)}k</span>
-    </label>
-  `).join("");
-}
-
-function toggleAllContextFiles(onlyUseful) {
-  let count = 0;
-  document.querySelectorAll(".ctx-file-cb").forEach(cb => {
-    if (onlyUseful && isUsefulTextFile(cb.value, 100000) && count < 8) {
-      cb.checked = true;
-      count++;
-    } else {
-      cb.checked = false;
-    }
-  });
+  if (countBadge) countBadge.textContent = `${currentRepoTree.length} fichiers indexés`;
 }
 
 async function fetchFileContent(repo, path, forceRefresh = false) {
@@ -825,36 +871,44 @@ async function fetchFileContent(repo, path, forceRefresh = false) {
   return decoded;
 }
 
-async function previewRepoFile(path) {
-  if (!currentRepo) return;
-  const box = document.getElementById("hud-file-viewer-box");
-  const title = document.getElementById("hud-file-viewer-title");
-  const contentEl = document.getElementById("hud-file-viewer-content");
-  box.classList.remove("hidden");
-  title.textContent = path;
-  contentEl.textContent = "Chargement UTF-8...";
-  try {
-    contentEl.textContent = await fetchFileContent(currentRepo, path);
-  } catch (e) {
-    contentEl.textContent = `Erreur : ${e.message}`;
+function renderAutoSelectedBadges(paths) {
+  const box = document.getElementById("hud-auto-selected-box");
+  const container = document.getElementById("hud-auto-selected-badges");
+  if (!box || !container) return;
+
+  if (!paths || paths.length === 0) {
+    box.classList.add("hidden");
+    return;
   }
+  box.classList.remove("hidden");
+  container.innerHTML = paths.map(p => `
+    <span class="px-2 py-0.5 rounded bg-cyan-950/90 text-cyan-300 border border-cyan-500/30">${escapeHtml(p)}</span>
+  `).join("");
 }
 
-// Point 2 V6.0 : Sélection autonome en amont avec gemini-2.5-flash si rien n'est coché
-async function autoSelectFilesWithFlash(promptText) {
-  const currentlyChecked = document.querySelectorAll(".ctx-file-cb:checked");
-  if (currentlyChecked.length > 0 || currentRepoTree.length === 0) return;
+// Sélection 100 % automatique des fichiers pertinents par gemini-3.5-flash-lite
+async function autoSelectFilesWithBaseModel(promptText) {
+  if (currentRepoTree.length === 0) {
+    autoSelectedPaths = [];
+    return [];
+  }
+
+  const fallbackFiles = currentRepoTree
+    .filter(f => isUsefulTextFile(f.path, f.size))
+    .slice(0, 8)
+    .map(f => f.path);
 
   const creds = getCreds();
   if (!creds.geminiKey) {
-    toggleAllContextFiles(true);
-    return;
+    autoSelectedPaths = fallbackFiles;
+    renderAutoSelectedBadges(autoSelectedPaths);
+    return autoSelectedPaths;
   }
 
   const treePaths = currentRepoTree.map(f => f.path).join("\n");
   const sys = `Tu es l'agent de routage de fichiers de Neural Dev Hub V6.0.
 Analyse l'arborescence complète du dépôt et la demande utilisateur.
-Sélectionne jusqu'à 8 fichiers existants les plus pertinents à lire et modifier.
+Sélectionne jusqu'à 8 fichiers existants les plus pertinents à lire ou modifier pour répondre à la demande.
 Réponds UNIQUEMENT avec des balises XML <path> contenant le chemin exact :
 <paths>
 <path>chemin/exact/fichier1.py</path>
@@ -862,7 +916,7 @@ Réponds UNIQUEMENT avec des balises XML <path> contenant le chemin exact :
 </paths>`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${creds.geminiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${BASE_ROUTING_MODEL}:generateContent?key=${creds.geminiKey}`;
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -876,35 +930,31 @@ Réponds UNIQUEMENT avec des balises XML <path> contenant le chemin exact :
     if (res.ok) {
       const data = await res.json();
       const rawXml = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      const validPathsSet = new Set(currentRepoTree.map(f => f.path));
       const selected = Array.from(rawXml.matchAll(/<path>([\s\S]*?)<\/path>/gi))
         .map(m => m[1].trim())
-        .filter(Boolean)
+        .filter(p => validPathsSet.has(p))
         .slice(0, 8);
 
       if (selected.length > 0) {
-        document.querySelectorAll(".ctx-file-cb").forEach(cb => {
-          cb.checked = selected.includes(cb.value);
-        });
-        return;
+        autoSelectedPaths = selected;
+        renderAutoSelectedBadges(autoSelectedPaths);
+        return autoSelectedPaths;
       }
     }
   } catch (e) {
-    console.warn("Repli autoSelectFilesWithFlash :", e);
+    console.warn("Repli autoSelectFilesWithBaseModel :", e);
   }
 
-  toggleAllContextFiles(true);
+  autoSelectedPaths = fallbackFiles;
+  renderAutoSelectedBadges(autoSelectedPaths);
+  return autoSelectedPaths;
 }
 
-async function gatherSelectedContext(repo) {
-  let checkedPaths = Array.from(document.querySelectorAll(".ctx-file-cb:checked")).map(cb => cb.value);
-  if (checkedPaths.length === 0 && currentRepoTree.length > 0) {
-    toggleAllContextFiles(true);
-    checkedPaths = Array.from(document.querySelectorAll(".ctx-file-cb:checked")).map(cb => cb.value);
-  }
-  checkedPaths = checkedPaths.slice(0, 10);
-
-  let bundle = `PROJET : ${repo.name}\nARBORESCENCE COMPLÈTE :\n${currentRepoTree.map(f => "- " + f.path).join("\n")}\n\n`;
-  for (const p of checkedPaths) {
+async function gatherSelectedContext(repo, explicitPaths = null) {
+  const pathsToLoad = (explicitPaths && explicitPaths.length > 0) ? explicitPaths : autoSelectedPaths;
+  let bundle = `PROJET : ${repo.name}\nARBORESCENCE COMPLÈTE DU DÉPÔT :\n${currentRepoTree.map(f => "- " + f.path).join("\n")}\n\n`;
+  for (const p of pathsToLoad.slice(0, 10)) {
     try {
       const code = await fetchFileContent(repo, p);
       bundle += `\n=== FICHIER ACTUEL : ${p} ===\n${code}\n`;
@@ -994,7 +1044,7 @@ function askUserOnSaturation(statusCode, modelName, rawErrorMsg = "") {
     }
 
     desc.innerHTML = `Le modèle <b>${escapeHtml(modelName)}</b> est temporairement indisponible. Comment veux-tu procéder ?${detailHtml}`;
-    document.getElementById("btn-rl-flash").classList.toggle("hidden", modelName === "gemini-2.5-flash");
+    document.getElementById("btn-rl-flash").classList.toggle("hidden", modelName === "gemini-3.5-flash-lite");
     document.getElementById("btn-rl-groq").classList.toggle("hidden", !getCreds().groqKey);
     document.getElementById("btn-rl-wait").disabled = false;
     panel.classList.remove("hidden");
@@ -1007,12 +1057,12 @@ async function callSelectedAgentRawXml(systemInstruction, userPrompt) {
   const creds = getCreds();
 
   if (provider === "gemini") {
-    if (!creds.geminiKey) throw new Error("Clé API Gemini manquante dans 'Clés & Sécurité'.");
+    if (!creds.geminiKey) throw new Error("Clé API Gemini manquante dans 'Clés & Mode PC'.");
     return await callGeminiRawText(modelName, creds.geminiKey, systemInstruction, userPrompt);
   }
 
   if (provider === "groq") {
-    if (!creds.groqKey) throw new Error("Clé API Groq manquante dans 'Clés & Sécurité'.");
+    if (!creds.groqKey) throw new Error("Clé API Groq manquante dans 'Clés & Mode PC'.");
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -1098,7 +1148,7 @@ async function callGeminiRawText(model, apiKey, sysPrompt, userPrompt, autoWaitM
 }
 
 // ============================================================================
-// 7. AUDIT IA (EN XML BRUT) & PARSEUR XML / CDATA V6.0 (`<file>`, `<patch>`)
+// 7. AUDIT VULGARISÉ & CONCRET + PARSEUR XML / CDATA V6.0 (`<file>`, `<patch>`)
 // ============================================================================
 async function analyzeCurrentRepo() {
   if (!currentRepo) return;
@@ -1106,24 +1156,27 @@ async function analyzeCurrentRepo() {
   const out = document.getElementById("hud-ai-analysis");
   btn.disabled = true;
   btn.textContent = "Analyse en cours...";
-  out.innerHTML = "Sélection des fichiers et génération de l'audit XML...";
+  out.innerHTML = "1/2 Sélection automatique des fichiers clés par Gemini 3.5 Flash-Lite...";
 
   try {
-    await autoSelectFilesWithFlash("Audit architectural complet du projet et pistes d'améliorations");
+    await autoSelectFilesWithBaseModel("Audit complet du fonctionnement du projet et propositions d'améliorations concrètes");
+    out.innerHTML = "2/2 Rédaction de l'audit clair et sans jargon...";
     const context = await gatherSelectedContext(currentRepo);
 
-    const sys = `Tu es un ingénieur logiciel senior. Analyse ce dépôt Git sans complaisance.
+    const sys = `Tu es un conseiller technique pédagogue et pragmatique.
+Ton objectif est d'expliquer ce dépôt Git simplement, sans jargon abstrait ni phrases compliquées, et de proposer 3 à 4 améliorations très concrètes dont l'utilité est immédiatement compréhensible.
+
 Réponds UNIQUEMENT en XML brut avec CDATA selon cette structure exacte :
 <audit>
-  <architecture_summary><![CDATA[Résumé clair de l'architecture]]></architecture_summary>
-  <how_it_works><![CDATA[Explication précise du fonctionnement]]></how_it_works>
+  <architecture_summary><![CDATA[Explique en 2 ou 3 phrases très simples à quoi sert ce projet et ce qu'il fait concrètement.]]></architecture_summary>
+  <how_it_works><![CDATA[Explique étape par étape comment le projet fonctionne en pratique (ex: 1. Entrée, 2. Traitement, 3. Résultat) avec des mots simples.]]></how_it_works>
   <improvement>
-    <title><![CDATA[Titre court de l'amélioration 1]]></title>
-    <description><![CDATA[Explication technique]]></description>
-    <ready_prompt><![CDATA[Prompt précis à envoyer à l'agent de code pour coder cette amélioration]]></ready_prompt>
+    <title><![CDATA[Titre court et parlant (ex: Éviter le blocage quand un fichier est vide)]]></title>
+    <problem><![CDATA[Quel est le problème ou le manque actuel expliqué simplement en 1 phrase.]]></problem>
+    <benefit><![CDATA[Ce que cette amélioration va t'apporter concrètement à l'usage en 1 phrase.]]></benefit>
+    <ready_prompt><![CDATA[Instruction technique complète et précise à donner à l'agent de code pour réaliser cette modification.]]></ready_prompt>
   </improvement>
-</audit>
-Propose 3 à 4 blocs <improvement>.`;
+</audit>`;
 
     const rawXml = await callSelectedAgentRawXml(sys, context);
     const extractTag = (src, tag) => {
@@ -1143,23 +1196,25 @@ Propose 3 à 4 blocs <improvement>.`;
       const block = m[1];
       lastAuditImprovements.push({
         title: extractTag(block, "title") || "Amélioration",
-        description: extractTag(block, "description") || "",
+        problem: extractTag(block, "problem") || extractTag(block, "description") || "",
+        benefit: extractTag(block, "benefit") || "",
         ready_prompt: extractTag(block, "ready_prompt") || ""
       });
     }
 
     const impHtml = lastAuditImprovements.map((imp, idx) => `
-      <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5">
-        <label class="flex items-start gap-2 cursor-pointer">
+      <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+        <label class="flex items-start gap-2.5 cursor-pointer">
           <input type="checkbox" class="audit-imp-cb mt-0.5 accent-cyan-500" value="${idx}" checked />
-          <div class="flex-1">
-            <div class="font-bold text-cyan-300">${idx + 1}. ${escapeHtml(imp.title)}</div>
-            <p class="text-slate-300 text-[11px] mt-0.5">${escapeHtml(imp.description)}</p>
+          <div class="flex-1 space-y-1">
+            <div class="font-bold text-cyan-300 text-xs">${idx + 1}. ${escapeHtml(imp.title)}</div>
+            ${imp.problem ? `<div class="text-[11px] text-slate-300"><span class="text-amber-300 font-semibold">Pourquoi :</span> ${escapeHtml(imp.problem)}</div>` : ""}
+            ${imp.benefit ? `<div class="text-[11px] text-slate-300"><span class="text-emerald-300 font-semibold">Résultat concret :</span> ${escapeHtml(imp.benefit)}</div>` : ""}
           </div>
         </label>
-        <div class="pl-5">
+        <div class="pl-6">
           <button type="button" onclick="applySingleImprovement(${idx})" class="text-[11px] bg-slate-800 hover:bg-cyan-700 text-cyan-200 hover:text-white px-2.5 py-1 rounded border border-cyan-500/30 font-semibold transition">
-            Coder uniquement celle-ci →
+            Coder cette amélioration →
           </button>
         </div>
       </div>
@@ -1172,16 +1227,16 @@ Propose 3 à 4 blocs <improvement>.`;
     ` : "";
 
     out.innerHTML = `
-      <div>
-        <div class="text-cyan-400 font-bold uppercase text-[11px] mb-1">Résumé Architectural</div>
+      <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+        <div class="text-cyan-400 font-bold uppercase text-[11px] mb-1">À quoi sert ce projet</div>
         <p>${escapeHtml(archSummary)}</p>
       </div>
-      <div>
-        <div class="text-cyan-400 font-bold uppercase text-[11px] mb-1">Fonctionnement du Code</div>
+      <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+        <div class="text-cyan-400 font-bold uppercase text-[11px] mb-1">Comment ça marche en pratique</div>
         <p class="whitespace-pre-line">${escapeHtml(howItWorks)}</p>
       </div>
       <div class="space-y-2">
-        <div class="text-cyan-400 font-bold uppercase text-[11px]">Améliorations Programmables</div>
+        <div class="text-cyan-400 font-bold uppercase text-[11px]">Propositions concrètes (Coche et lance)</div>
         ${impHtml}
         ${batchBtnHtml}
       </div>
@@ -1190,7 +1245,7 @@ Propose 3 à 4 blocs <improvement>.`;
     out.innerHTML = `<div class="text-rose-400">Erreur d'audit : ${escapeHtml(e.message)}</div>`;
   } finally {
     btn.disabled = false;
-    btn.textContent = "Analyser avec l'Agent";
+    btn.textContent = "Lancer l'Audit Clair";
   }
 }
 
@@ -1239,7 +1294,6 @@ function applyRawPatchBlocks(originalContent, patchBody, filePath) {
     updated = updated.slice(0, idx) + replaceStr + updated.slice(idx + searchStr.length);
   }
 
-  // Si l'agent a mis le fichier complet dans <patch> sans balises SEARCH/REPLACE, on l'utilise directement
   if (count === 0 && normalizedPatch.trim().length > 0) {
     return normalizedPatch;
   }
@@ -1260,7 +1314,6 @@ async function parseAndCompileAgentXml(rawText, repo) {
   const compiledFiles = [];
   const diffPreviewHtml = [];
 
-  // 1. Balises <file path="..." action="upsert|delete"><![CDATA[...]]></file>
   const fileRegex = /<file\s+path=["']([^"']+)["'](?:\s+action=["']([^"']+)["'])?\s*>([\s\S]*?)<\/file>/gi;
   let match;
   while ((match = fileRegex.exec(cleanText)) !== null) {
@@ -1288,7 +1341,6 @@ async function parseAndCompileAgentXml(rawText, repo) {
     }
   }
 
-  // 2. Balises <patch path="..."><![CDATA[<<<< SEARCH ... ==== ... >>>> REPLACE]]></patch>
   const patchRegex = /<patch\s+path=["']([^"']+)["']\s*>([\s\S]*?)<\/patch>/gi;
   while ((match = patchRegex.exec(cleanText)) !== null) {
     const path = match[1].trim();
@@ -1322,7 +1374,7 @@ INTERDICTION ABSOLUE D'UTILISER DU JSON. Réponds UNIQUEMENT en XML brut avec de
 
 Format obligatoire de ta réponse :
 <response>
-<summary><![CDATA[Explication concise des modifications]]></summary>
+<summary><![CDATA[Explication simple et concise des modifications]]></summary>
 <commit_msg><![CDATA[feat/fix: message de commit clair]]></commit_msg>
 
 <!-- Pour créer un nouveau fichier ou remplacer un fichier complet : -->
@@ -1352,15 +1404,15 @@ async function proposeCodeChanges() {
   const btn = document.getElementById("btn-generate-changes");
   const statusEl = document.getElementById("hud-prompt-status");
   btn.disabled = true;
-  btn.textContent = "1/2 Routing Flash : sélection des fichiers...";
-  statusEl.textContent = "Analyse de l'arborescence avec gemini-2.5-flash...";
+  btn.textContent = `1/2 Tri automatique des fichiers (${BASE_ROUTING_MODEL})...`;
+  statusEl.textContent = `Scan de l'arborescence par ${BASE_ROUTING_MODEL} pour sélectionner les fichiers utiles...`;
 
   try {
-    await autoSelectFilesWithFlash(promptText);
+    const selectedFiles = await autoSelectFilesWithBaseModel(promptText);
 
-    btn.textContent = "2/2 Génération XML / CDATA en cours...";
-    statusEl.textContent = "Téléchargement des fichiers sélectionnés et génération du code...";
-    const context = await gatherSelectedContext(currentRepo);
+    btn.textContent = "2/2 Téléchargement des fichiers & Génération XML...";
+    statusEl.textContent = `${selectedFiles.length} fichier(s) retenu(s). Génération du code avec l'Agent Principal...`;
+    const context = await gatherSelectedContext(currentRepo, selectedFiles);
 
     const rawResponse = await callSelectedAgentRawXml(
       XML_CODE_SYSTEM_PROMPT,
@@ -1385,11 +1437,10 @@ async function proposeCodeChanges() {
     statusEl.textContent = `❌ Erreur : ${e.message}`;
   } finally {
     btn.disabled = false;
-    btn.textContent = "1. Générer les modifications (Protocole XML / CDATA)";
+    btn.textContent = "1. Sélectionner les fichiers auto & Générer le code (XML / CDATA)";
   }
 }
 
-// Point 3 V6.0 : Commit Git Atomique Multi-Fichiers (Git Data API)
 async function pushAtomicCommit(owner, repoName, branch, commitMessage, filesArray, isEmptyRepo = false, autoBackup = true) {
   if (isEmptyRepo) {
     const first = filesArray.find(f => f.action !== "delete") || { path: "README.md", content: `# ${repoName}` };
@@ -1431,7 +1482,6 @@ async function pushAtomicCommit(owner, repoName, branch, commitMessage, filesArr
       if (!blobRes.ok) throw new Error(`Erreur blob ${file.path}: ${await blobRes.text()}`);
       const blobData = await blobRes.json();
       treeEntries.push({ path: file.path, mode: "100644", type: "blob", sha: blobData.sha });
-      // Mise à jour immédiate du cache local pour que l'Auto-Heal travaille sur la version fraîche
       currentFileCache[file.path] = file.content;
     }
   }
@@ -1469,9 +1519,7 @@ async function pushAtomicCommit(owner, repoName, branch, commitMessage, filesArr
   return { commitSha: newCommit.sha, backupTag: createdBackupTag };
 }
 
-// Point 4 V6.0 : Surveillance GitHub Actions & Extraction de la Traceback d'erreur
 async function waitForCIRunAndGetFailureLog(owner, repoName, commitSha, statusCallback) {
-  // Attente initiale pour laisser GitHub enregistrer le workflow_run du push
   await new Promise(r => setTimeout(r, 4500));
 
   for (let poll = 1; poll <= 28; poll++) {
@@ -1515,7 +1563,6 @@ async function extractFailedJobTrace(owner, repoName, runId) {
     const failedSteps = (failedJob.steps || []).filter(s => s.conclusion === "failure").map(s => s.name);
     summary += `Job en échec : ${failedJob.name}\nÉtapes plantées : ${failedSteps.join(", ") || "N/A"}\n`;
 
-    // Tentative de téléchargement du log brut du job (4500 derniers caractères)
     const logRes = await ghFetch(`/repos/${owner}/${repoName}/actions/jobs/${failedJob.id}/logs`);
     if (logRes.ok) {
       const rawLog = await logRes.text();
@@ -1523,7 +1570,6 @@ async function extractFailedJobTrace(owner, repoName, runId) {
       return summary;
     }
 
-    // Repli sur les annotations d'erreur si redirection CORS sur le log brut
     const checkRes = await ghFetch(`/repos/${owner}/${repoName}/check-runs/${failedJob.id}/annotations`);
     if (checkRes.ok) {
       const annotations = await checkRes.json();
@@ -1570,11 +1616,10 @@ async function commitStagedChanges() {
     currentRepoIsEmpty = false;
     await loadRepositoryTree(currentRepo);
 
-    // Cocher les fichiers modifiés pour qu'ils soient inclus en cas d'Auto-Heal
-    const touchedPaths = filesToCommit.map(f => f.path);
-    document.querySelectorAll(".ctx-file-cb").forEach(cb => {
-      if (touchedPaths.includes(cb.value)) cb.checked = true;
-    });
+    // Conserver tous les fichiers touchés dans le contexte actif en cas d'Auto-Heal
+    const touchedPaths = filesToCommit.filter(f => f.action !== "delete").map(f => f.path);
+    autoSelectedPaths = Array.from(new Set([...touchedPaths, ...autoSelectedPaths])).slice(0, 10);
+    renderAutoSelectedBadges(autoSelectedPaths);
 
     if (autoHealEnabled) {
       statusEl.textContent = `✅ Commit ${commitResult.commitSha.slice(0, 7)} poussé. Surveillance GitHub Actions (Auto-Heal)...`;
@@ -1585,9 +1630,9 @@ async function commitStagedChanges() {
       let cycle = 0;
       while (ciStatus.hasCI && !ciStatus.success && cycle < 3) {
         cycle++;
-        statusEl.textContent = `🔴 Échec CI détecté ! Auto-Heal Cycle ${cycle}/3 avec l'agent...`;
+        statusEl.textContent = `🔴 Échec CI détecté ! Auto-Heal Cycle ${cycle}/3 avec l'Agent Principal...`;
 
-        const updatedContext = await gatherSelectedContext(currentRepo);
+        const updatedContext = await gatherSelectedContext(currentRepo, autoSelectedPaths);
         const healPrompt = `Le commit précédent pour la demande "${stagedChanges.promptText || msg}" a fait échouer GitHub Actions.
 Voici la trace d'erreur exacte retournée par la CI/CD :
 
@@ -1725,19 +1770,26 @@ Inclus tous les fichiers de code complets sans troncature, les fichiers de dépe
 }
 
 // ============================================================================
-// DÉMARRAGE AUTOMATIQUE
+// DÉMARRAGE AUTOMATIQUE & DÉTECTION PREMIÈRE CONNEXION
 // ============================================================================
 function startApp() {
   const creds = getCreds();
-  document.getElementById("cfg-storage-mode").value = creds.mode;
+  selectStorageModeCard(creds.mode);
   document.getElementById("cfg-owner").value = creds.owner;
   document.getElementById("cfg-github-token").value = creds.githubToken;
   document.getElementById("cfg-gemini-key").value = creds.geminiKey;
   document.getElementById("cfg-groq-key").value = creds.groqKey;
+  updateStorageModeBadge();
 
   initBrain3D();
   detectLocalOllama();
-  loadAllRepositories();
+
+  // Si c'est la première connexion ou qu'aucune clé n'est enregistrée, on affiche la modale de choix PC Principal / Temporaire
+  if (!hasConfiguredStorageMode() || (!creds.githubToken && !creds.owner)) {
+    document.getElementById("first-run-modal").classList.remove("hidden");
+  } else {
+    loadAllRepositories();
+  }
 }
 
 if (document.readyState === "loading") {
