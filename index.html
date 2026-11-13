@@ -50,7 +50,7 @@
           <span id="status-ping" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
           <span id="status-dot" class="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
         </span>
-        <span class="font-bold tracking-wider text-xs uppercase text-cyan-400">Neural Dev Hub V5.6</span>
+        <span class="font-bold tracking-wider text-xs uppercase text-cyan-400">Neural Dev Hub V5.7</span>
       </div>
       <div class="h-4 w-[1px] bg-slate-700"></div>
       <span id="stats-counter" class="text-xs text-slate-300">En attente de clés...</span>
@@ -223,15 +223,25 @@
           <div id="hud-actions-list" class="space-y-2 text-slate-300">Chargement...</div>
         </div>
 
-        <!-- Dernier Commit & Rollback -->
-        <div class="bg-slate-900/75 p-3 rounded-xl border border-slate-800 space-y-2">
+        <!-- Dernier Commit & Sauvegardes Automatiques -->
+        <div class="bg-slate-900/75 p-3 rounded-xl border border-slate-800 space-y-2.5">
           <div class="flex items-center justify-between">
-            <span class="text-slate-400 text-[11px] uppercase font-semibold">Dernier Commit & Sécurité</span>
-            <button onclick="rollbackLastCommit()" class="text-[11px] bg-amber-950/80 hover:bg-amber-900 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
-              ⏪ Rollback au commit parent
-            </button>
+            <span class="text-slate-400 text-[11px] uppercase font-semibold">Dernier Commit & Backups Automatiques</span>
+            <div class="flex items-center gap-1.5">
+              <button onclick="createManualBackupSnapshot()" title="Créer un point de sauvegarde manuel maintenant" class="text-[10px] bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 px-2 py-0.5 rounded border border-cyan-500/30">
+                💾 Snapshot
+              </button>
+              <button onclick="rollbackLastCommit()" class="text-[10px] bg-amber-950/80 hover:bg-amber-900 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
+                ⏪ Rollback rapide
+              </button>
+            </div>
           </div>
           <div id="hud-last-commit" class="text-slate-300">Chargement...</div>
+
+          <div class="pt-2 border-t border-slate-800/80">
+            <div class="text-[10px] uppercase font-semibold text-slate-400 mb-1.5">Points de sauvegarde disponibles (créés avant chaque modification) :</div>
+            <div id="hud-backups-list" class="space-y-1.5 text-slate-300">Chargement des backups...</div>
+          </div>
         </div>
       </div>
 
@@ -260,7 +270,7 @@
 
         <div>
           <label class="block text-slate-300 font-semibold mb-1">Prompt de modification / ajout / suppression :</label>
-          <textarea id="hud-prompt-input" rows="4" placeholder="Décris la modification souhaitée. L'agent appliquera des patchs chirurgicaux sans tronquer les fichiers existants." class="w-full bg-slate-950/90 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-cyan-400 focus:outline-none"></textarea>
+          <textarea id="hud-prompt-input" rows="4" placeholder="Décris la modification souhaitée. L'agent appliquera des patchs chirurgicaux et créera une backup automatique avant le push." class="w-full bg-slate-950/90 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-cyan-400 focus:outline-none"></textarea>
         </div>
 
         <button id="btn-generate-changes" onclick="proposeCodeChanges()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 rounded-lg transition">
@@ -282,7 +292,7 @@
             <input id="hud-commit-msg" type="text" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white" />
           </div>
           <button id="btn-commit-push" onclick="commitStagedChanges()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 rounded-lg shadow transition">
-            2. Valider & Pousser le Commit sur GitHub
+            2. Créer Backup Auto & Pousser sur GitHub
           </button>
         </div>
       </div>
