@@ -1,5 +1,5 @@
 // ============================================================================
-// NEURAL DEV HUB V5 — MOTEUR 3D, GITHUB GIT DATA API & ROUTEUR MULTI-AGENTS
+// NEURAL DEV HUB V5.4 — MOTEUR 3D, GITHUB GIT DATA API & ROUTEUR MULTI-AGENTS
 // ============================================================================
 
 let graph3D = null;
@@ -236,7 +236,6 @@ async function ghFetch(endpoint, options = {}) {
   return resp;
 }
 
-// Lazy Loading en 1 seul appel API
 async function loadAllRepositories() {
   const creds = getCreds();
   const stats = document.getElementById("stats-counter");
@@ -518,7 +517,6 @@ async function loadLastCommitInfo(repo) {
   `;
 }
 
-// Rollback propre en Fast-Forward (restaure l'arbre du commit parent sans force-push)
 async function rollbackLastCommit() {
   if (!currentRepo) return;
   if (!confirm(`Voulez-vous créer un commit de restauration vers l'état précédant le dernier commit sur ${currentRepo.name} ?`)) return;
@@ -561,11 +559,11 @@ async function rollbackLastCommit() {
 }
 
 // ============================================================================
-// 5. LECTURE DE L'ARBORESCENCE ET DES FICHIERS (GESTION 409 DÉPÔT VIDE)
+// 5. LECTURE DE L'ARBORESCENCE ET DES FICHIERS (QUOTA GRATUIT OPTIMISÉ)
 // ============================================================================
 function isUsefulTextFile(filePath, size = 0) {
   const lower = filePath.toLowerCase();
-  if (size > 60000) return false;
+  if (size > 20000) return false;
   if (IGNORED_PATHS.some(ig => lower.includes(ig))) return false;
   return TEXT_EXTENSIONS.some(ext => lower.endsWith(ext));
 }
@@ -595,8 +593,11 @@ async function loadRepositoryTree(repo) {
     </div>
   `).join("");
 
+  let autoCount = 0;
   ctxEl.innerHTML = currentRepoTree.map(f => {
-    const checked = isUsefulTextFile(f.path, f.size) ? "checked" : "";
+    const shouldCheck = isUsefulTextFile(f.path, f.size) && autoCount < 4;
+    if (shouldCheck) autoCount++;
+    const checked = shouldCheck ? "checked" : "";
     return `
       <label class="flex items-center gap-2 cursor-pointer hover:bg-slate-900 px-1.5 py-0.5 rounded">
         <input type="checkbox" class="ctx-file-cb" value="${escapeHtml(f.path)}" ${checked} />
@@ -607,8 +608,14 @@ async function loadRepositoryTree(repo) {
 }
 
 function toggleAllContextFiles(onlyUseful) {
+  let count = 0;
   document.querySelectorAll(".ctx-file-cb").forEach(cb => {
-    cb.checked = onlyUseful ? isUsefulTextFile(cb.value, 1000) : true;
+    if (onlyUseful && isUsefulTextFile(cb.value, 1000) && count < 4) {
+      cb.checked = true;
+      count++;
+    } else {
+      cb.checked = false;
+    }
   });
 }
 
@@ -638,12 +645,13 @@ async function previewRepoFile(path) {
 }
 
 async function gatherSelectedContext(repo) {
-  const checkedPaths = Array.from(document.querySelectorAll(".ctx-file-cb:checked")).map(cb => cb.value).slice(0, 12);
-  let bundle = `PROJET : ${repo.name}\nARBORESCENCE COMPLÈTE :\n${currentRepoTree.map(f => "- " + f.path).join("\n")}\n\n`;
+  const checkedPaths = Array.from(document.querySelectorAll(".ctx-file-cb:checked")).map(cb => cb.value).slice(0, 4);
+  let bundle = `PROJET : ${repo.name}\nARBORESCENCE :\n${currentRepoTree.slice(0, 40).map(f => "- " + f.path).join("\n")}\n\n`;
   for (const p of checkedPaths) {
     try {
       const code = await fetchFileContent(repo, p);
-      bundle += `\n=== FICHIER : ${p} ===\n${code}\n`;
+      const trimmed = code.length > 12000 ? code.slice(0, 12000) + "\n// [TRONQUÉ POUR QUOTA GRATUIT]" : code;
+      bundle += `\n=== FICHIER : ${p} ===\n${trimmed}\n`;
     } catch {}
   }
   return bundle;
@@ -721,7 +729,7 @@ function switchFallbackModel(newAgentValue) {
   }
 }
 
-function askUserOnSaturation(statusCode, modelName) {
+function askUserOnSaturation(statusCode, modelName, rawErrorMsg = "") {
   return new Promise(resolve => {
     pendingRetryResolver = resolve;
     const panel = document.getElementById("rate-limit-panel");
@@ -732,9 +740,14 @@ function askUserOnSaturation(statusCode, modelName) {
       ? `Quota atteint sur ${modelName} (HTTP 429)`
       : `Pic de charge sur ${modelName} (HTTP 503)`;
 
-    desc.innerHTML = `Le modèle <b>${escapeHtml(modelName)}</b> est temporairement indisponible. Comment veux-tu procéder ?`;
+    let detailHtml = "";
+    if (rawErrorMsg) {
+      detailHtml = `<div class="mt-1.5 p-1.5 bg-slate-950/90 rounded border border-slate-800 text-[10px] text-amber-200 break-words">${escapeHtml(rawErrorMsg.slice(0, 220))}</div>`;
+    }
 
-    document.getElementById("btn-rl-flash").classList.toggle("hidden", modelName === "gemini-3.8-flash");
+    desc.innerHTML = `Le modèle <b>${escapeHtml(modelName)}</b> est temporairement indisponible. Comment veux-tu procéder ?${detailHtml}`;
+
+    document.getElementById("btn-rl-flash").classList.toggle("hidden", modelName === "gemini-3.5-flash-lite");
     document.getElementById("btn-rl-groq").classList.toggle("hidden", !getCreds().groqKey);
     document.getElementById("btn-rl-wait").disabled = false;
     document.getElementById("rl-wait-sub").textContent = "Relance automatique toutes les 15 secondes jusqu'à libération du serveur.";
@@ -755,25 +768,31 @@ async function callSelectedAgent(systemInstruction, userPrompt, schema = null) {
 
   if (provider === "groq") {
     if (!creds.groqKey) throw new Error("Clé API Groq manquante dans 'Clés & Sécurité'.");
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${creds.groqKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: modelName,
-        temperature: 0.1,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: systemInstruction + "\nRéponds UNIQUEMENT en JSON valide." },
-          { role: "user", content: userPrompt }
-        ]
-      })
-    });
-    if (!res.ok) throw new Error(`Groq HTTP ${res.status}: ${await res.text()}`);
-    const data = await res.json();
-    return sanitizeJsonResponse(data.choices[0].message.content);
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${creds.groqKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: modelName,
+          temperature: 0.1,
+          messages: [
+            { role: "system", content: systemInstruction + "\nIMPORTANT: Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ni après." },
+            { role: "user", content: userPrompt + "\n\nFormat attendu : JSON pur." }
+          ]
+        })
+      });
+      if (!res.ok) throw new Error(`Groq HTTP ${res.status}: ${await res.text()}`);
+      const data = await res.json();
+      return sanitizeJsonResponse(data.choices[0].message.content);
+    } catch (e) {
+      if (e.name === "TypeError" && e.message.includes("fetch")) {
+        throw new Error("Connexion vers api.groq.com bloquée par ton navigateur ou le pare-feu de ce PC (désactive ton bloqueur de pub ou vérifie le proxy réseau).");
+      }
+      throw e;
+    }
   }
 
   if (provider === "ollama") {
@@ -799,7 +818,7 @@ async function callSelectedAgent(systemInstruction, userPrompt, schema = null) {
 async function callGeminiWithUserChoice(model, apiKey, sysPrompt, userPrompt, schema, autoWaitMode = false) {
   const generationConfig = {
     temperature: 0.15,
-    maxOutputTokens: 65536,
+    maxOutputTokens: 8192,
     responseMimeType: "application/json"
   };
   if (schema) generationConfig.responseSchema = schema;
@@ -816,6 +835,12 @@ async function callGeminiWithUserChoice(model, apiKey, sysPrompt, userPrompt, sc
   });
 
   if (res.status === 429 || res.status === 503) {
+    let apiErrMsg = "";
+    try {
+      const errJson = await res.json();
+      apiErrMsg = errJson.error?.message || "";
+    } catch {}
+
     if (autoWaitMode) {
       const decision = await new Promise(resolve => {
         pendingRetryResolver = resolve;
@@ -830,7 +855,7 @@ async function callGeminiWithUserChoice(model, apiKey, sysPrompt, userPrompt, sc
       return await callGeminiWithUserChoice(model, apiKey, sysPrompt, userPrompt, schema, true);
     }
 
-    const decision = await askUserOnSaturation(res.status, model);
+    const decision = await askUserOnSaturation(res.status, model, apiErrMsg);
     if (decision.action === "cancel") {
       throw new Error("Requête annulée par l'utilisateur.");
     }
@@ -1004,7 +1029,6 @@ async function commitFilesAtomically(owner, repoName, branch, commitMessage, fil
     if (!initRes.ok) throw new Error(`Échec initialisation dépôt vide : ${await initRes.text()}`);
   }
 
-  // 1. Récupérer la référence HEAD et le base_tree
   const refRes = await ghFetch(`/repos/${owner}/${repoName}/git/ref/heads/${branch}`);
   if (!refRes.ok) throw new Error(`Impossible de lire refs/heads/${branch} : ${await refRes.text()}`);
   const refData = await refRes.json();
@@ -1014,7 +1038,6 @@ async function commitFilesAtomically(owner, repoName, branch, commitMessage, fil
   const commitData = await commitRes.json();
   const baseTreeSha = commitData.tree.sha;
 
-  // 2. Construire les entrées de l'arbre (avec support suppression sha: null)
   const treeEntries = [];
   for (const file of filesArray) {
     if (file.action === "delete") {
@@ -1030,7 +1053,6 @@ async function commitFilesAtomically(owner, repoName, branch, commitMessage, fil
     }
   }
 
-  // 3. Créer le nouvel arbre avec base_tree obligatoire
   const newTreeRes = await ghFetch(`/repos/${owner}/${repoName}/git/trees`, {
     method: "POST",
     body: JSON.stringify({ base_tree: baseTreeSha, tree: treeEntries })
@@ -1038,7 +1060,6 @@ async function commitFilesAtomically(owner, repoName, branch, commitMessage, fil
   if (!newTreeRes.ok) throw new Error(`Erreur création git/tree : ${await newTreeRes.text()}`);
   const newTree = await newTreeRes.json();
 
-  // 4. Créer le commit
   const createCommitRes = await ghFetch(`/repos/${owner}/${repoName}/git/commits`, {
     method: "POST",
     body: JSON.stringify({
@@ -1050,7 +1071,6 @@ async function commitFilesAtomically(owner, repoName, branch, commitMessage, fil
   if (!createCommitRes.ok) throw new Error(`Erreur création commit : ${await createCommitRes.text()}`);
   const newCommit = await createCommitRes.json();
 
-  // 5. Mettre à jour la branche
   const updateRefRes = await ghFetch(`/repos/${owner}/${repoName}/git/refs/heads/${branch}`, {
     method: "PATCH",
     body: JSON.stringify({ sha: newCommit.sha, force: false })
