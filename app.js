@@ -920,6 +920,8 @@ const CODE_CHANGES_SCHEMA = {
   required: ["summary", "commit_message", "files"]
 };
 
+let lastAuditImprovements = [];
+
 async function analyzeCurrentRepo() {
   if (!currentRepo) return;
   const btn = document.getElementById("btn-analyze-repo");
@@ -932,16 +934,30 @@ async function analyzeCurrentRepo() {
     const context = await gatherSelectedContext(currentRepo);
     const sys = `Tu es un ingénieur logiciel senior. Analyse ce dépôt Git sans complaisance. Explique clairement ce que fait le code et propose 3 à 4 améliorations concrètes. Réponds en français au format JSON demandé.`;
     const result = await callSelectedAgent(sys, context, AUDIT_SCHEMA);
+    lastAuditImprovements = result.improvements || [];
 
-    const impHtml = (result.improvements || []).map((imp, idx) => `
+    const impHtml = lastAuditImprovements.map((imp, idx) => `
       <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5">
-        <div class="font-bold text-cyan-300">${idx + 1}. ${escapeHtml(imp.title)}</div>
-        <p class="text-slate-300 text-[11px]">${escapeHtml(imp.description)}</p>
-        <button onclick="applyImprovementPrompt('${ encodeURIComponent(imp.ready_prompt) }')" class="text-[11px] bg-cyan-700 hover:bg-cyan-600 text-white px-2.5 py-1 rounded font-semibold transition">
-          Coder cette amélioration →
-        </button>
+        <label class="flex items-start gap-2 cursor-pointer">
+          <input type="checkbox" class="audit-imp-cb mt-0.5 accent-cyan-500" value="${idx}" checked />
+          <div class="flex-1">
+            <div class="font-bold text-cyan-300">${idx + 1}. ${escapeHtml(imp.title)}</div>
+            <p class="text-slate-300 text-[11px] mt-0.5">${escapeHtml(imp.description)}</p>
+          </div>
+        </label>
+        <div class="pl-5">
+          <button type="button" onclick="applySingleImprovement(${idx})" class="text-[11px] bg-slate-800 hover:bg-cyan-700 text-cyan-200 hover:text-white px-2.5 py-1 rounded border border-cyan-500/30 font-semibold transition">
+            Coder uniquement celle-ci →
+          </button>
+        </div>
       </div>
     `).join("");
+
+    const batchBtnHtml = lastAuditImprovements.length > 0 ? `
+      <button type="button" onclick="applySelectedImprovements()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white py-2 rounded-lg font-bold shadow transition">
+        Coder les améliorations cochées en une fois →
+      </button>
+    ` : "";
 
     out.innerHTML = `
       <div>
@@ -953,8 +969,9 @@ async function analyzeCurrentRepo() {
         <p class="whitespace-pre-line">${escapeHtml(result.how_it_works)}</p>
       </div>
       <div class="space-y-2">
-        <div class="text-cyan-400 font-bold uppercase text-[11px]">Améliorations Programmables en 1 Clic</div>
+        <div class="text-cyan-400 font-bold uppercase text-[11px]">Améliorations Programmables</div>
         ${impHtml}
+        ${batchBtnHtml}
       </div>
     `;
   } catch (e) {
@@ -965,11 +982,33 @@ async function analyzeCurrentRepo() {
   }
 }
 
-function applyImprovementPrompt(encodedPrompt) {
+function applySingleImprovement(index) {
+  const imp = lastAuditImprovements[index];
+  if (!imp) return;
   switchHudTab("prompt");
-  document.getElementById("hud-prompt-input").value = decodeURIComponent(encodedPrompt);
+  document.getElementById("hud-prompt-input").value = imp.ready_prompt;
 }
 
+function applySelectedImprovements() {
+  const selectedIndexes = Array.from(document.querySelectorAll(".audit-imp-cb:checked"))
+    .map(cb => parseInt(cb.value, 10));
+
+  if (selectedIndexes.length === 0) {
+    alert("Coche au moins une amélioration à appliquer.");
+    return;
+  }
+
+  const combinedPrompt = selectedIndexes
+    .map((idx, i) => {
+      const imp = lastAuditImprovements[idx];
+      return `### Amélioration ${i + 1} : ${imp.title}\n${imp.ready_prompt}`;
+    })
+    .join("\n\n");
+
+  switchHudTab("prompt");
+  document.getElementById("hud-prompt-input").value =
+    `Applique conjointement les améliorations suivantes en veillant à leur cohérence globale :\n\n${combinedPrompt}`;
+}
 async function proposeCodeChanges() {
   if (!currentRepo) return;
   const promptText = document.getElementById("hud-prompt-input").value.trim();
