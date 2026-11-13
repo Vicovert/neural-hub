@@ -3,347 +3,113 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Neural Dev Hub — Cerveau 3D & Pilotage Git</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>NEURAL DEV HUB // V6.0 AUTONOMOUS</title>
+  <link rel="stylesheet" href="style.css" />
   <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
-  <script src="https://unpkg.com/three-spritetext@1.8.2/dist/three-spritetext.min.js"></script>
   <script src="https://unpkg.com/3d-force-graph@1.73.3/dist/3d-force-graph.min.js"></script>
-  <style>
-    body, html {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background-color: #030712;
-      color: #f3f4f6;
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    #3d-graph {
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-    }
-    .glass {
-      background: rgba(11, 17, 32, 0.86);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(56, 189, 248, 0.24);
-      box-shadow: 0 0 35px rgba(14, 165, 233, 0.14);
-    }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
-    ::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.4); border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.7); }
-  </style>
 </head>
 <body>
-
-  <!-- Scène WebGL du Cerveau 3D -->
-  <div id="3d-graph"></div>
-
-  <!-- Barre supérieure HUD -->
-  <header class="fixed top-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
-    <div class="glass px-4 py-2 rounded-xl flex items-center gap-3 pointer-events-auto">
-      <div class="flex items-center gap-2">
-        <span class="relative flex h-3 w-3">
-          <span id="status-ping" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-          <span id="status-dot" class="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
-        </span>
-        <span class="font-bold tracking-wider text-xs uppercase text-cyan-400">Neural Dev Hub V5.7</span>
-      </div>
-      <div class="h-4 w-[1px] bg-slate-700"></div>
-      <span id="stats-counter" class="text-xs text-slate-300">En attente de clés...</span>
-      <span id="scopes-badge" class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 hidden"></span>
-      <button onclick="loadAllRepositories()" class="text-xs bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2.5 py-1 rounded border border-cyan-500/30 transition">
-        Rafraîchir 3D
-      </button>
-      <button onclick="resetCamera()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded border border-slate-700 transition">
-        Recentre
-      </button>
+  <header id="topbar">
+    <div class="brand">
+      <span class="pulse-dot"></span>
+      <h1>NEURAL DEV HUB <span class="badge">V6.0 XML-ENGINE</span></h1>
     </div>
 
-    <div class="glass px-3.5 py-2 rounded-xl flex flex-wrap items-center gap-2.5 pointer-events-auto">
-      <label class="text-xs text-slate-400">Agent :</label>
-      <select id="agent-selector" class="bg-slate-900 text-xs text-cyan-300 border border-cyan-500/30 rounded px-2.5 py-1 focus:outline-none">
-        <option value="gemini:gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (Gratuit / Haut Quota)</option>
-        <option value="gemini:gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (Gratuit / Rapide)</option>
-        <option value="gemini:gemini-4-hydrogen">Gemini 4 Hydrogen (Gratuit / Quotidien)</option>
-        <option value="groq:llama-3.1-8b-instant">Groq — Llama 3.1 8B Instant</option>
-        <option value="groq:openai/gpt-oss-120b">Groq — GPT-OSS 120B</option>
-        <option value="groq:meta-llama/llama-4-maverick-17b-128e-instruct">Groq — Llama 4 Maverick 17B</option>
-        <option id="ollama-opt" value="ollama:deepseek-r1:32b" disabled>Ollama Local (Non détecté)</option>
-      </select>
+    <div class="top-controls">
+      <label class="ctrl-group">
+        <span>Modèle Codeur :</span>
+        <select id="agent-model-select">
+          <option value="gemini-2.5-pro" selected>Gemini 2.5 Pro (Architecte & Gros Code)</option>
+          <option value="gemini-2.5-flash">Gemini 2.5 Flash (Rapide & Chirurgical)</option>
+          <option value="gemini-1.5-pro">Gemini 1.5 Pro (Fallback Stable)</option>
+        </select>
+      </label>
 
-      <button onclick="toggleNewProjectDrawer()" class="text-xs bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-3 py-1.5 rounded-lg shadow transition">
-        + Nouveau Projet par Prompt
-      </button>
+      <label class="ctrl-group checkbox-lbl" title="Lit les logs d'erreur GitHub Actions et corrige le code automatiquement jusqu'à validation">
+        <input type="checkbox" id="auto-heal-toggle" checked />
+        <span>Auto-Heal CI/CD (Max 3 cycles)</span>
+      </label>
 
-      <button onclick="toggleSettingsDrawer()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-600 transition">
-        Clés & Sécurité
-      </button>
+      <button id="btn-center-cortex" class="btn-secondary">🎯 Pivot Cortex</button>
+      <button id="btn-open-settings" class="btn-secondary">⚙️ Clés API</button>
     </div>
   </header>
 
-  <!-- Tiroir Configuration & Sécurité -->
-  <aside id="settings-drawer" class="fixed top-16 right-3 z-30 w-96 max-w-[94vw] glass rounded-2xl p-5 hidden">
-    <div class="flex items-center justify-between mb-2">
-      <h2 class="text-xs font-bold uppercase tracking-wider text-cyan-400">Clés API & Sécurité</h2>
-      <button onclick="toggleSettingsDrawer()" class="text-slate-400 hover:text-white text-sm">✕</button>
-    </div>
-    <p class="text-[11px] text-slate-400 mb-3">
-      Sur un PC qui n'est pas le tien, garde le mode <b>Session (Onglet)</b> : les clés disparaissent dès que tu fermes l'onglet.
-    </p>
-    <div class="space-y-2.5 text-xs">
-      <div>
-        <label class="block text-slate-300 mb-1">Mode de stockage des clés</label>
-        <select id="cfg-storage-mode" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white">
-          <option value="session">Session (PC tiers — effacé à la fermeture de l'onglet)</option>
-          <option value="local">Persistant (Mon PC personnel — localStorage)</option>
-        </select>
-      </div>
-      <div>
-        <label class="block text-slate-300 mb-1">Utilisateur GitHub (optionnel : auto-détecté via Token)</label>
-        <input id="cfg-owner" type="text" placeholder="Vicovert" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
-      </div>
-      <div>
-        <label class="block text-slate-300 mb-1">GitHub Personal Access Token (coches: <code>repo</code> + <code>workflow</code>)</label>
-        <input id="cfg-github-token" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
-      </div>
-      <div>
-        <label class="block text-slate-300 mb-1">Clé Google Gemini (AI Studio)</label>
-        <input id="cfg-gemini-key" type="password" placeholder="AIzaSyXXXXXXXXXXXXXXXXXX" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
-      </div>
-      <div>
-        <label class="block text-slate-300 mb-1">Clé Groq API (Optionnel — secours)</label>
-        <input id="cfg-groq-key" type="password" placeholder="gsk_xxxxxxxxxxxxxxxxxxxx" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
-      </div>
-      <div class="flex items-center gap-2 pt-2">
-        <button onclick="saveCredentials()" class="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 rounded-lg transition">
-          Enregistrer & Connecter
-        </button>
-        <button onclick="clearCredentials()" class="bg-rose-900/80 hover:bg-rose-700 text-rose-200 px-3 py-2 rounded-lg border border-rose-500/40 transition">
-          Purger
-        </button>
-      </div>
-    </div>
-  </aside>
+  <main id="viewport">
+    <div id="graph-3d"></div>
 
-  <!-- Tiroir Création de Dépôt par Prompt -->
-  <aside id="new-project-drawer" class="fixed top-16 left-3 z-30 w-[440px] max-w-[94vw] glass rounded-2xl p-5 hidden">
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="text-xs font-bold uppercase tracking-wider text-cyan-400">Créer un Dépôt Git de A à Z par Prompt</h2>
-      <button onclick="toggleNewProjectDrawer()" class="text-slate-400 hover:text-white text-sm">✕</button>
-    </div>
-    <div class="space-y-3 text-xs">
-      <div class="grid grid-cols-3 gap-2">
-        <div class="col-span-2">
-          <label class="block text-slate-300 mb-1">Nom du dépôt GitHub</label>
-          <input id="new-repo-name" type="text" placeholder="ex: mon-nouveau-projet" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
+    <aside id="project-hud" class="hidden">
+      <div class="hud-header">
+        <div class="hud-title-row">
+          <h2 id="hud-repo-title">Nom du Projet</h2>
+          <span id="hud-repo-branch" class="sub-badge">main</span>
+          <span id="hud-ci-badge" class="ci-badge ci-neutral">CI: Inconnu</span>
         </div>
-        <div>
-          <label class="block text-slate-300 mb-1">Visibilité</label>
-          <select id="new-repo-private" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white">
-            <option value="false">Public</option>
-            <option value="true">Privé</option>
-          </select>
+        <button id="btn-close-hud" class="btn-icon">✕</button>
+      </div>
+
+      <div class="hud-section">
+        <div class="section-title">
+          <span>FLUX D'EXÉCUTION AUTONOME</span>
+          <span id="agent-step-indicator" class="step-pill">Prêt</span>
+        </div>
+        <div id="agent-terminal" class="terminal-box"></div>
+      </div>
+
+      <div class="hud-section prompt-section">
+        <div class="section-title">
+          <span>ORDRE ARCHITECTURAL (SANS LIMITE DE LIGNES NI DE FICHIERS)</span>
+        </div>
+        <textarea
+          id="hud-prompt-input"
+          placeholder="Décris la fonctionnalité ou le bug à résoudre. L'agent explore l'arborescence, coche les fichiers requis, modifie ou réécrit le code en XML brut, pousse un commit atomique et vérifie la CI GitHub Actions..."
+        ></textarea>
+
+        <div class="action-row">
+          <button id="btn-execute-agent" class="btn-primary">⚡ LANCER L'AGENT AUTONOME</button>
+          <button id="btn-stop-agent" class="btn-danger hidden">⏹ STOPPER LE CYCLE</button>
         </div>
       </div>
-      <div>
-        <label class="block text-slate-300 mb-1">Prompt complet du projet à générer</label>
-        <textarea id="new-repo-prompt" rows="4" placeholder="Décris le projet. L'agent crée le repo sur GitHub, attend l'initialisation de la branche, génère tous les fichiers complets et pousse le commit atomique." class="w-full bg-slate-900 border border-slate-700 rounded p-2.5 text-white focus:border-cyan-400 focus:outline-none"></textarea>
-      </div>
-      <button id="btn-create-repo" onclick="createRepoFromPrompt()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 rounded-lg shadow transition">
-        Créer le dépôt & Générer le code
-      </button>
-      <div id="new-repo-log" class="text-[11px] text-slate-300 bg-slate-950/80 p-2.5 rounded border border-slate-800 hidden max-h-44 overflow-y-auto whitespace-pre-wrap"></div>
-    </div>
-  </aside>
 
-  <!-- Panneau HUD Latéral du Projet Sélectionné (ancré à droite, non-popup) -->
-  <aside id="project-hud" class="fixed top-16 bottom-3 right-3 z-20 w-[520px] max-w-[95vw] glass rounded-2xl flex flex-col hidden overflow-hidden">
-    <!-- En-tête -->
-    <div class="p-3.5 border-b border-slate-800 flex items-start justify-between gap-2 bg-slate-900/60">
-      <div class="min-w-0">
-        <div class="flex items-center gap-2">
-          <span id="hud-workflow-badge" class="px-2 py-0.5 text-[10px] font-bold uppercase rounded bg-slate-700 text-slate-200">SCAN...</span>
-          <h2 id="hud-title" class="text-sm font-bold text-white truncate">Nom du projet</h2>
-        </div>
-        <p id="hud-desc" class="text-[11px] text-slate-400 mt-1 truncate">Description</p>
-      </div>
-      <div class="flex items-center gap-1.5 shrink-0">
-        <button onclick="refreshCurrentProject()" title="Rafraîchir ce projet" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 rounded border border-slate-700">↻</button>
-        <a id="hud-github-link" href="#" target="_blank" class="text-xs bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2.5 py-1 rounded border border-cyan-500/30">GitHub ↗</a>
-        <button onclick="closeProjectHud()" class="text-slate-400 hover:text-white px-2 py-1 text-sm">✕</button>
-      </div>
-    </div>
-
-    <!-- Onglets -->
-    <div class="flex border-b border-slate-800 bg-slate-950/50 text-xs">
-      <button onclick="switchHudTab('overview')" id="tab-btn-overview" class="flex-1 py-2.5 font-semibold text-cyan-400 border-b-2 border-cyan-400">
-        Vue & Santé
-      </button>
-      <button onclick="switchHudTab('ai')" id="tab-btn-ai" class="flex-1 py-2.5 font-semibold text-slate-400 hover:text-slate-200">
-        Audit & Roadmap
-      </button>
-      <button onclick="switchHudTab('prompt')" id="tab-btn-prompt" class="flex-1 py-2.5 font-semibold text-slate-400 hover:text-slate-200">
-        Coder par Prompt
-      </button>
-      <button onclick="switchHudTab('files')" id="tab-btn-files" class="flex-1 py-2.5 font-semibold text-slate-400 hover:text-slate-200">
-        Fichiers
-      </button>
-    </div>
-
-    <!-- Contenu des onglets -->
-    <div class="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs">
-
-      <!-- ONGLET 1 : VUE & SANTÉ -->
-      <div id="tab-overview" class="space-y-3.5">
-        <div class="grid grid-cols-2 gap-2.5">
-          <div class="bg-slate-900/75 p-3 rounded-xl border border-slate-800">
-            <div class="text-slate-400 text-[11px]">Site Web / Déploiement</div>
-            <div id="hud-site-status" class="text-xs font-bold text-slate-200 mt-1">Vérification...</div>
-            <a id="hud-site-url" href="#" target="_blank" class="text-[11px] text-cyan-400 underline hidden mt-1 inline-block">Ouvrir le site live ↗</a>
-          </div>
-          <div class="bg-slate-900/75 p-3 rounded-xl border border-slate-800">
-            <div class="text-slate-400 text-[11px]">Achats & Revenus (metrics.json)</div>
-            <div id="hud-sales-status" class="text-xs font-bold text-slate-200 mt-1">Scan...</div>
-            <div id="hud-sales-sub" class="text-[10px] text-slate-400 mt-0.5"></div>
+      <div class="hud-section files-section">
+        <div class="section-title">
+          <span>ARBORESCENCE (Sélection auto par IA ou manuelle)</span>
+          <div class="mini-actions">
+            <button id="btn-uncheck-all" class="btn-mini">Tout décocher</button>
+            <button id="btn-refresh-tree" class="btn-mini">🔄</button>
           </div>
         </div>
-
-        <!-- Workflows GitHub Actions -->
-        <div class="bg-slate-900/75 p-3 rounded-xl border border-slate-800 space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="text-slate-400 text-[11px] uppercase font-semibold">GitHub Actions & Diagnostic CI/CD</span>
-            <button onclick="triggerWorkflowDispatch()" class="text-[11px] bg-cyan-950 hover:bg-cyan-900 text-cyan-300 px-2 py-0.5 rounded border border-cyan-500/30">
-              ⚡ Déclencher Workflow
-            </button>
-          </div>
-          <div id="hud-actions-list" class="space-y-2 text-slate-300">Chargement...</div>
-        </div>
-
-        <!-- Dernier Commit & Sauvegardes Automatiques -->
-        <div class="bg-slate-900/75 p-3 rounded-xl border border-slate-800 space-y-2.5">
-          <div class="flex items-center justify-between">
-            <span class="text-slate-400 text-[11px] uppercase font-semibold">Dernier Commit & Backups Automatiques</span>
-            <div class="flex items-center gap-1.5">
-              <button onclick="createManualBackupSnapshot()" title="Créer un point de sauvegarde manuel maintenant" class="text-[10px] bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 px-2 py-0.5 rounded border border-cyan-500/30">
-                💾 Snapshot
-              </button>
-              <button onclick="rollbackLastCommit()" class="text-[10px] bg-amber-950/80 hover:bg-amber-900 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
-                ⏪ Rollback rapide
-              </button>
-            </div>
-          </div>
-          <div id="hud-last-commit" class="text-slate-300">Chargement...</div>
-
-          <div class="pt-2 border-t border-slate-800/80">
-            <div class="text-[10px] uppercase font-semibold text-slate-400 mb-1.5">Points de sauvegarde disponibles (créés avant chaque modification) :</div>
-            <div id="hud-backups-list" class="space-y-1.5 text-slate-300">Chargement des backups...</div>
-          </div>
-        </div>
+        <div id="hud-file-list" class="file-list"></div>
       </div>
 
-      <!-- ONGLET 2 : AUDIT & ROADMAP IA -->
-      <div id="tab-ai" class="space-y-3 hidden">
-        <div class="flex items-center justify-between">
-          <span class="text-slate-300 font-semibold">Que fait ce code & Améliorations possibles</span>
-          <button id="btn-analyze-repo" onclick="analyzeCurrentRepo()" class="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1.5 rounded-lg font-semibold transition">
-            Analyser avec l'Agent
-          </button>
+      <div class="hud-section backup-section">
+        <div class="section-title">
+          <span>POINTS DE RESTAURATION GIT (TAGS)</span>
+          <button id="btn-create-tag" class="btn-mini">+ Créer Tag</button>
         </div>
-        <div id="hud-ai-analysis" class="bg-slate-950/70 p-3.5 rounded-xl border border-slate-800 space-y-3 text-slate-200 leading-relaxed">
-          Clique sur « Analyser avec l'Agent » pour inspecter le code réel du projet, obtenir son résumé architectural et générer des boutons d'améliorations applicables en un clic.
-        </div>
+        <div id="hud-tag-list" class="tag-list"></div>
       </div>
+    </aside>
+  </main>
 
-      <!-- ONGLET 3 : CODER PAR PROMPT -->
-      <div id="tab-prompt" class="space-y-3 hidden">
-        <div>
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-slate-300 font-semibold">Fichiers inclus dans le contexte de l'agent :</span>
-            <button onclick="toggleAllContextFiles(true)" class="text-[10px] text-cyan-400 hover:underline">Réinitialiser sélection</button>
-          </div>
-          <div id="hud-context-files" class="bg-slate-950/70 p-2 rounded-lg border border-slate-800 max-h-28 overflow-y-auto space-y-1 font-mono text-[11px]"></div>
-        </div>
-
-        <div>
-          <label class="block text-slate-300 font-semibold mb-1">Prompt de modification / ajout / suppression :</label>
-          <textarea id="hud-prompt-input" rows="4" placeholder="Décris la modification souhaitée. L'agent appliquera des patchs chirurgicaux et créera une backup automatique avant le push." class="w-full bg-slate-950/90 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-cyan-400 focus:outline-none"></textarea>
-        </div>
-
-        <button id="btn-generate-changes" onclick="proposeCodeChanges()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 rounded-lg transition">
-          1. Générer les modifications (Diff avant Commit)
-        </button>
-
-        <div id="hud-prompt-status" class="text-xs text-amber-300 whitespace-pre-wrap"></div>
-
-        <!-- Prévisualisation des fichiers générés avant commit -->
-        <div id="hud-staged-box" class="hidden space-y-3 bg-slate-950/85 p-3 rounded-xl border border-cyan-500/40">
-          <div class="flex items-center justify-between">
-            <span class="font-bold text-cyan-300">Aperçu avant Commit Atomique :</span>
-            <span id="hud-staged-count" class="text-[10px] bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded">0 fichier</span>
-          </div>
-          <p id="hud-staged-summary" class="text-slate-300 italic text-[11px]"></p>
-          <div id="hud-staged-files" class="space-y-2 max-h-60 overflow-y-auto"></div>
-          <div>
-            <label class="block text-[11px] text-slate-400 mb-1">Message du commit :</label>
-            <input id="hud-commit-msg" type="text" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white" />
-          </div>
-          <button id="btn-commit-push" onclick="commitStagedChanges()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 rounded-lg shadow transition">
-            2. Créer Backup Auto & Pousser sur GitHub
-          </button>
-        </div>
+  <div id="settings-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <h3>Configuration des Accès API</h3>
+      <label>
+        <span>Token GitHub (PAT avec droits <code>repo</code> et <code>workflow</code>) :</span>
+        <input type="password" id="input-gh-token" placeholder="ghp_..." />
+      </label>
+      <label>
+        <span>Clé API Google Gemini (AI Studio / Pro) :</span>
+        <input type="password" id="input-gemini-key" placeholder="AIzaSy..." />
+      </label>
+      <div class="modal-actions">
+        <button id="btn-close-settings" class="btn-secondary">Annuler</button>
+        <button id="btn-save-settings" class="btn-primary">Sauvegarder & Recharger</button>
       </div>
-
-      <!-- ONGLET 4 : EXPLORATEUR DE FICHIERS -->
-      <div id="tab-files" class="space-y-2 hidden">
-        <div class="text-slate-400 text-[11px]">Clique sur un fichier pour lire son code (UTF-8 intégral) :</div>
-        <div id="hud-file-tree" class="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 max-h-56 overflow-y-auto space-y-1 font-mono text-[11px]"></div>
-        <div id="hud-file-viewer-box" class="hidden space-y-1 pt-2">
-          <div id="hud-file-viewer-title" class="text-cyan-400 font-mono text-[11px] font-bold"></div>
-          <pre id="hud-file-viewer-content" class="bg-slate-950 p-3 rounded-xl border border-slate-800 overflow-x-auto max-h-72 text-[11px] text-slate-200"></pre>
-        </div>
-      </div>
-
     </div>
-  </aside>
+  </div>
 
-  <!-- Panneau de décision en cas de saturation API (503 / 429) -->
-  <aside id="rate-limit-panel" class="fixed bottom-4 left-4 z-40 w-[460px] max-w-[94vw] glass rounded-2xl p-4 hidden border border-amber-500/50">
-    <div class="flex items-start justify-between gap-2 mb-2">
-      <div class="flex items-center gap-2">
-        <span class="h-2.5 w-2.5 rounded-full bg-amber-400 animate-ping"></span>
-        <h3 id="rl-title" class="text-xs font-bold uppercase tracking-wider text-amber-300">Serveur IA saturé (HTTP 429)</h3>
-      </div>
-      <button onclick="cancelRetryLoop()" class="text-slate-400 hover:text-white text-xs">Annuler ✕</button>
-    </div>
-
-    <p id="rl-desc" class="text-[11px] text-slate-300 leading-relaxed mb-3"></p>
-
-    <div class="space-y-2 text-xs">
-      <button id="btn-rl-wait" onclick="startActiveWaitLoop()" class="w-full text-left p-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 transition">
-        <div class="font-bold text-amber-200">1. Patienter et conserver la qualité maximale</div>
-        <div id="rl-wait-sub" class="text-[10px] text-slate-300 mt-0.5">Relance automatique toutes les 15 secondes jusqu'à libération du serveur.</div>
-      </button>
-
-      <button id="btn-rl-flash" onclick="switchFallbackModel('gemini:gemini-3.5-flash-lite')" class="w-full text-left p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/30 transition">
-        <div class="font-bold text-cyan-300">2. Basculer sur Gemini 3.5 Flash-Lite (Quota gratuit garanti)</div>
-        <div class="text-[10px] text-slate-400 mt-0.5">Impact qualité : modèle léger haute vitesse, idéal pour l'audit et les modifications ciblées sans quota bloqué.</div>
-      </button>
-
-      <button id="btn-rl-groq" onclick="switchFallbackModel('groq:llama-3.1-8b-instant')" class="w-full text-left p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 transition">
-        <div class="font-bold text-slate-200">3. Basculer sur Groq — Llama 3.1 8B Instant (Si clé configurée)</div>
-        <div class="text-[10px] text-slate-400 mt-0.5">Impact qualité : ultra-rapide, mais fenêtre de contexte plus courte et moins précis sur les refontes multi-fichiers complexes.</div>
-      </button>
-    </div>
-  </aside>
-
-  <script>
-    const script = document.createElement('script');
-    script.src = `app.js?v=${Date.now()}`;
-    document.body.appendChild(script);
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>
