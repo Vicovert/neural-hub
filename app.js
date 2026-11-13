@@ -12,6 +12,9 @@ let currentFileCache = {};
 let stagedChanges = null;
 let grantedScopes = "";
 
+let pendingRetryResolver = null;
+let retryIntervalId = null;
+
 const TEXT_EXTENSIONS = [
   ".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".md",
   ".yml", ".yaml", ".json", ".toml", ".txt", ".sh", ".scad", "dockerfile"
@@ -647,7 +650,7 @@ async function gatherSelectedContext(repo) {
 }
 
 // ============================================================================
-// 6. ROUTEUR MULTI-AGENTS (GEMINI + FALLBACK AUTO 429, GROQ, OLLAMA LOCAL)
+// 6. ROUTEUR MULTI-AGENTS & GESTION INTERACTIVE DE SATURATION (503 / 429)
 // ============================================================================
 async function detectLocalOllama() {
   const ctrl = new AbortController();
@@ -671,6 +674,75 @@ function sanitizeJsonResponse(raw) {
   return JSON.parse(cleaned);
 }
 
+function cancelRetryLoop() {
+  if (retryIntervalId) clearInterval(retryIntervalId);
+  retryIntervalId = null;
+  document.getElementById("rate-limit-panel").classList.add("hidden");
+  if (pendingRetryResolver) {
+    pendingRetryResolver({ action: "cancel" });
+    pendingRetryResolver = null;
+  }
+}
+
+function startActiveWaitLoop() {
+  const subEl = document.getElementById("rl-wait-sub");
+  const btnWait = document.getElementById("btn-rl-wait");
+  btnWait.disabled = true;
+
+  let secondsLeft = 15;
+  subEl.textContent = `Nouvelle tentative automatique dans ${secondsLeft}s...`;
+
+  if (retryIntervalId) clearInterval(retryIntervalId);
+  retryIntervalId = setInterval(() => {
+    secondsLeft--;
+    if (secondsLeft <= 0) {
+      clearInterval(retryIntervalId);
+      retryIntervalId = null;
+      btnWait.disabled = false;
+      subEl.textContent = "Tentative de connexion en cours...";
+      if (pendingRetryResolver) {
+        pendingRetryResolver({ action: "retry" });
+        pendingRetryResolver = null;
+      }
+    } else {
+      subEl.textContent = `Nouvelle tentative automatique dans ${secondsLeft}s...`;
+    }
+  }, 1000);
+}
+
+function switchFallbackModel(newAgentValue) {
+  if (retryIntervalId) clearInterval(retryIntervalId);
+  retryIntervalId = null;
+  document.getElementById("agent-selector").value = newAgentValue;
+  document.getElementById("rate-limit-panel").classList.add("hidden");
+  if (pendingRetryResolver) {
+    pendingRetryResolver({ action: "switch", agent: newAgentValue });
+    pendingRetryResolver = null;
+  }
+}
+
+function askUserOnSaturation(statusCode, modelName) {
+  return new Promise(resolve => {
+    pendingRetryResolver = resolve;
+    const panel = document.getElementById("rate-limit-panel");
+    const title = document.getElementById("rl-title");
+    const desc = document.getElementById("rl-desc");
+
+    title.textContent = statusCode === 429
+      ? `Quota atteint sur ${modelName} (HTTP 429)`
+      : `Pic de charge sur ${modelName} (HTTP 503)`;
+
+    desc.innerHTML = `Le modèle <b>${escapeHtml(modelName)}</b> est temporairement indisponible. Comment veux-tu procéder ?`;
+
+    document.getElementById("btn-rl-flash").classList.toggle("hidden", modelName === "gemini-3.8-flash");
+    document.getElementById("btn-rl-groq").classList.toggle("hidden", !getCreds().groqKey);
+    document.getElementById("btn-rl-wait").disabled = false;
+    document.getElementById("rl-wait-sub").textContent = "Relance automatique toutes les 15 secondes jusqu'à libération du serveur.";
+
+    panel.classList.remove("hidden");
+  });
+}
+
 async function callSelectedAgent(systemInstruction, userPrompt, schema = null) {
   const sel = document.getElementById("agent-selector").value;
   const [provider, modelName] = sel.split(":");
@@ -678,7 +750,7 @@ async function callSelectedAgent(systemInstruction, userPrompt, schema = null) {
 
   if (provider === "gemini") {
     if (!creds.geminiKey) throw new Error("Clé API Gemini manquante dans 'Clés & Sécurité'.");
-    return await callGeminiWithFallback(modelName, creds.geminiKey, systemInstruction, userPrompt, schema);
+    return await callGeminiWithUserChoice(modelName, creds.geminiKey, systemInstruction, userPrompt, schema);
   }
 
   if (provider === "groq") {
@@ -724,7 +796,7 @@ async function callSelectedAgent(systemInstruction, userPrompt, schema = null) {
   }
 }
 
-async function callGeminiWithFallback(model, apiKey, sysPrompt, userPrompt, schema) {
+async function callGeminiWithUserChoice(model, apiKey, sysPrompt, userPrompt, schema, autoWaitMode = false) {
   const generationConfig = {
     temperature: 0.15,
     maxOutputTokens: 65536,
@@ -743,11 +815,34 @@ async function callGeminiWithFallback(model, apiKey, sysPrompt, userPrompt, sche
     })
   });
 
-  // Fallback automatique vers gemini-3.8-flash en cas de quota 429/503 ou 404
-  if ((res.status === 429 || res.status === 503 || res.status === 404) && model !== "gemini-3.8-flash") {
-    console.warn(`Erreur ${res.status} sur ${model}, bascule automatique sur gemini-3.8-flash...`);
-    return await callGeminiWithFallback("gemini-3.8-flash", apiKey, sysPrompt, userPrompt, schema);
+  if (res.status === 429 || res.status === 503) {
+    if (autoWaitMode) {
+      const decision = await new Promise(resolve => {
+        pendingRetryResolver = resolve;
+        startActiveWaitLoop();
+      });
+      if (decision && decision.action === "cancel") {
+        throw new Error("Requête annulée par l'utilisateur.");
+      }
+      if (decision && decision.action === "switch") {
+        return await callSelectedAgent(sysPrompt, userPrompt, schema);
+      }
+      return await callGeminiWithUserChoice(model, apiKey, sysPrompt, userPrompt, schema, true);
+    }
+
+    const decision = await askUserOnSaturation(res.status, model);
+    if (decision.action === "cancel") {
+      throw new Error("Requête annulée par l'utilisateur.");
+    }
+    if (decision.action === "switch") {
+      return await callSelectedAgent(sysPrompt, userPrompt, schema);
+    }
+    if (decision.action === "retry") {
+      return await callGeminiWithUserChoice(model, apiKey, sysPrompt, userPrompt, schema, true);
+    }
   }
+
+  document.getElementById("rate-limit-panel").classList.add("hidden");
 
   if (!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${await res.text()}`);
   const data = await res.json();
@@ -1086,9 +1181,6 @@ async function createRepoFromPrompt() {
   }
 }
 
-// ============================================================================
-// DÉMARRAGE AUTOMATIQUE
-// ============================================================================
 // ============================================================================
 // DÉMARRAGE AUTOMATIQUE (COMPATIBLE CHARGEMENT DYNAMIQUE)
 // ============================================================================
