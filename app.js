@@ -981,19 +981,19 @@ async function callSelectedAgent(systemInstruction, userPrompt, schema = null) {
 }
 
 async function callGeminiWithUserChoice(model, apiKey, sysPrompt, userPrompt, schema, autoWaitMode = false) {
+  // On retire responseSchema pour laisser Gemini Pro structurer son JSON nativement sans crash de troncature
   const generationConfig = {
-    temperature: 0.1,
-    maxOutputTokens: 16384,
+    temperature: 0.2,
+    maxOutputTokens: 65536,
     responseMimeType: "application/json"
   };
-  if (schema) generationConfig.responseSchema = schema;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: sysPrompt }] },
+      systemInstruction: { parts: [{ text: sysPrompt + "\nRéponds UNIQUEMENT avec un objet JSON valide contenant tes modifications." }] },
       contents: [{ role: "user", parts: [{ text: userPrompt }] }],
       generationConfig
     })
