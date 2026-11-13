@@ -1,5 +1,5 @@
 // ============================================================================
-// NEURAL DEV HUB V5.5 — MOTEUR 3D, GITHUB GIT DATA API & ROUTEUR MULTI-AGENTS
+// NEURAL DEV HUB V5.6 — AGENT AUTONOME (PATCH CHIRURGICAL & DIFF MULTI-FICHIERS)
 // ============================================================================
 
 let graph3D = null;
@@ -560,11 +560,11 @@ async function rollbackLastCommit() {
 }
 
 // ============================================================================
-// 5. LECTURE DE L'ARBORESCENCE ET DES FICHIERS
+// 5. LECTURE DE L'ARBORESCENCE ET DES FICHIERS (CONTEXTE COMPLET)
 // ============================================================================
 function isUsefulTextFile(filePath, size = 0) {
   const lower = filePath.toLowerCase();
-  if (size > 25000) return false;
+  if (size > 150000) return false;
   if (IGNORED_PATHS.some(ig => lower.includes(ig))) return false;
   return TEXT_EXTENSIONS.some(ext => lower.endsWith(ext));
 }
@@ -596,13 +596,14 @@ async function loadRepositoryTree(repo) {
 
   let autoCount = 0;
   ctxEl.innerHTML = currentRepoTree.map(f => {
-    const shouldCheck = isUsefulTextFile(f.path, f.size) && autoCount < 4;
+    const shouldCheck = isUsefulTextFile(f.path, f.size) && autoCount < 8;
     if (shouldCheck) autoCount++;
     const checked = shouldCheck ? "checked" : "";
     return `
       <label class="flex items-center gap-2 cursor-pointer hover:bg-slate-900 px-1.5 py-0.5 rounded">
         <input type="checkbox" class="ctx-file-cb" value="${escapeHtml(f.path)}" ${checked} />
         <span class="truncate text-slate-300">${escapeHtml(f.path)}</span>
+        <span class="ml-auto text-[10px] text-slate-500">${((f.size || 0) / 1024).toFixed(1)}k</span>
       </label>
     `;
   }).join("");
@@ -611,7 +612,7 @@ async function loadRepositoryTree(repo) {
 function toggleAllContextFiles(onlyUseful) {
   let count = 0;
   document.querySelectorAll(".ctx-file-cb").forEach(cb => {
-    if (onlyUseful && isUsefulTextFile(cb.value, 1000) && count < 4) {
+    if (onlyUseful && isUsefulTextFile(cb.value, 100000) && count < 8) {
       cb.checked = true;
       count++;
     } else {
@@ -646,13 +647,14 @@ async function previewRepoFile(path) {
 }
 
 async function gatherSelectedContext(repo, isForCodeGeneration = false) {
-  const checkedPaths = Array.from(document.querySelectorAll(".ctx-file-cb:checked")).map(cb => cb.value).slice(0, 6);
-  let bundle = `PROJET : ${repo.name}\nARBORESCENCE :\n${currentRepoTree.slice(0, 40).map(f => "- " + f.path).join("\n")}\n\n`;
+  const checkedPaths = Array.from(document.querySelectorAll(".ctx-file-cb:checked")).map(cb => cb.value).slice(0, 10);
+  let bundle = `PROJET : ${repo.name}\nARBORESCENCE COMPLÈTE :\n${currentRepoTree.map(f => "- " + f.path).join("\n")}\n\n`;
   for (const p of checkedPaths) {
     try {
       const code = await fetchFileContent(repo, p);
-      const contentToInclude = (!isForCodeGeneration && code.length > 12000)
-        ? code.slice(0, 12000) + "\n// [TRONQUÉ POUR AUDIT]"
+      // En génération de code, on envoie toujours le fichier complet (même 2000 lignes) pour des patchs exacts
+      const contentToInclude = (!isForCodeGeneration && code.length > 25000)
+        ? code.slice(0, 25000) + "\n// [APERÇU AUDIT]"
         : code;
       bundle += `\n=== FICHIER : ${p} ===\n${contentToInclude}\n`;
     } catch {}
@@ -690,7 +692,7 @@ function sanitizeJsonResponse(raw) {
   try {
     return JSON.parse(cleaned);
   } catch (err) {
-    throw new Error(`Réponse IA tronquée ou malformée (sélectionne moins de fichiers ou d'améliorations à la fois). Détail : ${err.message}`);
+    throw new Error(`Réponse JSON invalide ou tronquée. Détail : ${err.message}`);
   }
 }
 
@@ -791,7 +793,7 @@ async function callSelectedAgent(systemInstruction, userPrompt, schema = null) {
           model: modelName,
           temperature: 0.1,
           messages: [
-            { role: "system", content: systemInstruction + "\nIMPORTANT: Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ni après." },
+            { role: "system", content: systemInstruction + "\nIMPORTANT: Réponds UNIQUEMENT avec un objet JSON valide, sans aucun texte avant ni après." },
             { role: "user", content: userPrompt + "\n\nFormat attendu : JSON pur." }
           ]
         })
@@ -829,8 +831,8 @@ async function callSelectedAgent(systemInstruction, userPrompt, schema = null) {
 
 async function callGeminiWithUserChoice(model, apiKey, sysPrompt, userPrompt, schema, autoWaitMode = false) {
   const generationConfig = {
-    temperature: 0.15,
-    maxOutputTokens: 32768,
+    temperature: 0.1,
+    maxOutputTokens: 16384,
     responseMimeType: "application/json"
   };
   if (schema) generationConfig.responseSchema = schema;
@@ -888,7 +890,7 @@ async function callGeminiWithUserChoice(model, apiKey, sysPrompt, userPrompt, sc
 }
 
 // ============================================================================
-// 7. AUDIT DU PROJET & GÉNÉRATION DE CODE MULTI-FICHIERS PAR PROMPT
+// 7. AUDIT DU PROJET & MOTEUR DE PATCH CHIRURGICAL (SEARCH & REPLACE)
 // ============================================================================
 const AUDIT_SCHEMA = {
   type: "OBJECT",
@@ -911,7 +913,41 @@ const AUDIT_SCHEMA = {
   required: ["architecture_summary", "how_it_works", "improvements"]
 };
 
-const CODE_CHANGES_SCHEMA = {
+// Schéma chirurgical : l'agent ne régénère JAMAIS les gros fichiers existants en entier,
+// il fournit des blocs exacts { search, replace } comme Antigravity / Claude Code.
+const PATCH_CHANGES_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    summary: { type: "STRING" },
+    commit_message: { type: "STRING" },
+    operations: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          path: { type: "STRING" },
+          action: { type: "STRING", enum: ["patch", "create", "delete"] },
+          content: { type: "STRING" },
+          hunks: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                search: { type: "STRING" },
+                replace: { type: "STRING" }
+              },
+              required: ["search", "replace"]
+            }
+          }
+        },
+        required: ["path", "action"]
+      }
+    }
+  },
+  required: ["summary", "commit_message", "operations"]
+};
+
+const NEW_REPO_SCHEMA = {
   type: "OBJECT",
   properties: {
     summary: { type: "STRING" },
@@ -1020,6 +1056,25 @@ function applySelectedImprovements() {
     `Applique conjointement les améliorations suivantes en veillant à leur cohérence globale :\n\n${combinedPrompt}`;
 }
 
+// Applique les blocs Search & Replace avec normalisation souple des fins de ligne (\r\n vs \n)
+function applySurgicalHunks(originalContent, hunks, filePath) {
+  let updated = originalContent.replace(/\r\n/g, "\n");
+  for (let i = 0; i < hunks.length; i++) {
+    const searchBlock = (hunks[i].search || "").replace(/\r\n/g, "\n");
+    const replaceBlock = (hunks[i].replace || "").replace(/\r\n/g, "\n");
+
+    if (!searchBlock) {
+      throw new Error(`Bloc 'search' vide dans le patch #${i + 1} pour ${filePath}.`);
+    }
+    const idx = updated.indexOf(searchBlock);
+    if (idx === -1) {
+      throw new Error(`Le bloc cible #${i + 1} dans '${filePath}' est introuvable dans le fichier original (correspondance exacte requise). Réessaie ou coche le fichier.`);
+    }
+    updated = updated.slice(0, idx) + replaceBlock + updated.slice(idx + searchBlock.length);
+  }
+  return updated;
+}
+
 async function proposeCodeChanges() {
   if (!currentRepo) return;
   const promptText = document.getElementById("hud-prompt-input").value.trim();
@@ -1028,49 +1083,90 @@ async function proposeCodeChanges() {
   const btn = document.getElementById("btn-generate-changes");
   const statusEl = document.getElementById("hud-prompt-status");
   btn.disabled = true;
-  btn.textContent = "Génération du code complet en cours...";
-  statusEl.textContent = "L'agent lit le contexte et prépare les fichiers complets...";
+  btn.textContent = "Analyse et génération des patchs chirurgicaux...";
+  statusEl.textContent = "L'agent inspecte le code et prépare les modifications ciblées...";
 
   try {
     const context = await gatherSelectedContext(currentRepo, true);
-    const sys = `Tu es un ingénieur logiciel expert. RÈGLE STRICTE : Pour chaque fichier créé ou modifié (action: "upsert"), tu DOIS fournir L'INTÉGRALITÉ du code du fichier dans "content", sans JAMAIS tronquer ni écrire de commentaires du type "// ... reste du code". Si un fichier doit être supprimé, mets action: "delete" et content: "". Si tu crées un workflow GitHub Actions, inclus toujours 'workflow_dispatch:'.`;
-    const userMsg = `${context}\n\nINSTRUCTION DE MODIFICATION À APPLIQUER :\n${promptText}`;
+    const sys = `Tu es un ingénieur logiciel autonome (style Antigravity / Claude Code).
+Pour modifier un fichier EXISTANT, utilise UNIQUEMENT action: "patch" avec une liste "hunks" contenant des paires { "search": "extrait exact de 3 à 15 lignes du fichier existant", "replace": "nouveau code remplaçant cet extrait" }.
+RÈGLES STRICTES :
+1. Ne réécris JAMAIS un fichier existant en entier : utilise toujours "patch" avec le code exact copié caractère pour caractère dans "search" (indentation comprise).
+2. Utilise action: "create" (avec "content" complet) UNIQUEMENT pour créer un tout nouveau fichier qui n'existe pas encore dans l'arborescence.
+3. Utilise action: "delete" pour supprimer un fichier.
+4. Si tu crées un workflow GitHub Actions, inclus toujours 'workflow_dispatch:'.`;
 
-    const res = await callSelectedAgent(sys, userMsg, CODE_CHANGES_SCHEMA);
+    const userMsg = `${context}\n\nINSTRUCTION À APPLIQUER :\n${promptText}`;
+    const res = await callSelectedAgent(sys, userMsg, PATCH_CHANGES_SCHEMA);
 
-    // Garde-fou anti-écrasement : vérifie qu'un fichier existant de >100 lignes n'est pas réduit de plus de 50%
-    for (const f of res.files || []) {
-      if (f.action === "upsert" && currentFileCache[f.path]) {
-        const oldLines = currentFileCache[f.path].split("\n").length;
-        const newLines = (f.content || "").split("\n").length;
-        if (oldLines > 100 && newLines < oldLines * 0.5) {
-          throw new Error(`Sécurité anti-troncature : le modèle a renvoyé ${newLines} lignes pour '${f.path}' au lieu de ${oldLines} lignes originales. Commit bloqué pour protéger ton code.`);
-        }
+    const compiledFiles = [];
+    const diffPreviewHtml = [];
+
+    for (const op of res.operations || []) {
+      if (op.action === "delete") {
+        compiledFiles.push({ path: op.path, action: "delete", content: "" });
+        diffPreviewHtml.push(`
+          <details class="bg-slate-900 rounded-lg border border-rose-500/30 p-2">
+            <summary class="cursor-pointer font-mono text-[11px] font-bold text-rose-400">[DELETE] ${escapeHtml(op.path)}</summary>
+            <div class="mt-1 text-[10px] text-rose-300">Ce fichier sera supprimé du dépôt.</div>
+          </details>
+        `);
+      } else if (op.action === "create") {
+        const content = op.content || "";
+        compiledFiles.push({ path: op.path, action: "upsert", content });
+        diffPreviewHtml.push(`
+          <details class="bg-slate-900 rounded-lg border border-emerald-500/30 p-2" open>
+            <summary class="cursor-pointer font-mono text-[11px] font-bold text-emerald-300">[NOUVEAU FICHIER] ${escapeHtml(op.path)} (${content.split("\n").length} lignes)</summary>
+            <pre class="mt-2 p-2 bg-slate-950 rounded text-[10px] text-emerald-200 overflow-x-auto max-h-48">${escapeHtml(content)}</pre>
+          </details>
+        `);
+      } else if (op.action === "patch") {
+        const original = await fetchFileContent(currentRepo, op.path);
+        const hunks = op.hunks || [];
+        const patchedContent = applySurgicalHunks(original, hunks, op.path);
+        compiledFiles.push({ path: op.path, action: "upsert", content: patchedContent });
+
+        const hunksHtml = hunks.map((h, idx) => `
+          <div class="mt-1.5 border border-slate-800 rounded overflow-hidden text-[10px] font-mono">
+            <div class="bg-slate-800/80 px-2 py-0.5 text-slate-300">Bloc modifié #${idx + 1}</div>
+            <pre class="p-1.5 bg-rose-950/40 text-rose-300 overflow-x-auto whitespace-pre-wrap">- ${escapeHtml(h.search)}</pre>
+            <pre class="p-1.5 bg-emerald-950/40 text-emerald-300 overflow-x-auto whitespace-pre-wrap">+ ${escapeHtml(h.replace)}</pre>
+          </div>
+        `).join("");
+
+        diffPreviewHtml.push(`
+          <details class="bg-slate-900 rounded-lg border border-cyan-500/30 p-2" open>
+            <summary class="cursor-pointer font-mono text-[11px] font-bold text-cyan-300">
+              [PATCH] ${escapeHtml(op.path)} (${hunks.length} bloc(s) • ${original.split("\n").length} → ${patchedContent.split("\n").length} lignes)
+            </summary>
+            ${hunksHtml}
+          </details>
+        `);
       }
     }
 
-    stagedChanges = res;
+    if (compiledFiles.length === 0) {
+      throw new Error("L'agent n'a retourné aucune modification applicable.");
+    }
+
+    stagedChanges = {
+      summary: res.summary,
+      commit_message: res.commit_message,
+      files: compiledFiles
+    };
 
     document.getElementById("hud-staged-box").classList.remove("hidden");
-    document.getElementById("hud-staged-count").textContent = `${res.files.length} fichier(s)`;
+    document.getElementById("hud-staged-count").textContent = `${compiledFiles.length} fichier(s)`;
     document.getElementById("hud-staged-summary").textContent = res.summary;
     document.getElementById("hud-commit-msg").value = res.commit_message || "Mise à jour via Neural Dev Hub";
-
-    document.getElementById("hud-staged-files").innerHTML = res.files.map(f => `
-      <details class="bg-slate-900 rounded-lg border border-slate-800 p-2">
-        <summary class="cursor-pointer font-mono text-[11px] font-bold ${f.action === 'delete' ? 'text-rose-400' : 'text-emerald-300'}">
-          [${f.action.toUpperCase()}] ${escapeHtml(f.path)} (${(f.content || "").split("\n").length} lignes)
-        </summary>
-        <pre class="mt-2 p-2 bg-slate-950 rounded text-[10px] text-slate-200 overflow-x-auto max-h-48">${escapeHtml(f.content)}</pre>
-      </details>
-    `).join("");
+    document.getElementById("hud-staged-files").innerHTML = diffPreviewHtml.join("");
 
     statusEl.textContent = "";
   } catch (e) {
     statusEl.textContent = `Erreur génération : ${e.message}`;
   } finally {
     btn.disabled = false;
-    btn.textContent = "1. Générer le code complet (Prévisualisation avant Commit)";
+    btn.textContent = "1. Générer les modifications (Diff avant Commit)";
   }
 }
 
@@ -1228,7 +1324,7 @@ async function createRepoFromPrompt() {
 
     logEl.textContent += `3/4 Génération complète des fichiers par l'Agent IA...\n`;
     const sys = `Tu es un architecte logiciel senior. Génère l'intégralité des fichiers nécessaires pour ce nouveau dépôt GitHub (${name}). Inclus un README.md clair, tous les fichiers de code complets sans aucune troncature, les fichiers de dépendances (ex: requirements.txt ou package.json) et, si pertinent, un workflow GitHub Actions (.github/workflows/main.yml incluant obligatoirement 'workflow_dispatch:'). Tous les fichiers ont action: "upsert".`;
-    const generated = await callSelectedAgent(sys, promptText, CODE_CHANGES_SCHEMA);
+    const generated = await callSelectedAgent(sys, promptText, NEW_REPO_SCHEMA);
 
     logEl.textContent += `4/4 Commit atomique de ${generated.files.length} fichier(s) sur GitHub...\n`;
     try {
