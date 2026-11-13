@@ -1089,7 +1089,10 @@ async function createRepoFromPrompt() {
 // ============================================================================
 // DÉMARRAGE AUTOMATIQUE
 // ============================================================================
-window.addEventListener("DOMContentLoaded", () => {
+// ============================================================================
+// DÉMARRAGE AUTOMATIQUE (COMPATIBLE CHARGEMENT DYNAMIQUE)
+// ============================================================================
+function startApp() {
   const creds = getCreds();
   document.getElementById("cfg-storage-mode").value = creds.mode;
   document.getElementById("cfg-owner").value = creds.owner;
@@ -1100,4 +1103,10 @@ window.addEventListener("DOMContentLoaded", () => {
   initBrain3D();
   detectLocalOllama();
   loadAllRepositories();
-});
+}
+
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", startApp);
+} else {
+  startApp();
+}
