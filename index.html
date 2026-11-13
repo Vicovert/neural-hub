@@ -3,25 +3,87 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Neural Dev Hub V6.0 - Cortex & Autonomous Agent</title>
-  <link rel="stylesheet" href="style.css">
+  <!-- Désactivation stricte du cache HTML -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>Neural Dev Hub V6.0 - Cortex Synaptique</title>
+
+  <!-- Import unique de Three.js + 3d-force-graph -->
   <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
   <script src="https://unpkg.com/3d-force-graph@1.73.3/dist/3d-force-graph.min.js"></script>
+
+  <!-- Chargeur CSS anti-cache instantané -->
+  <script>
+    (function() {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'style.css?v=' + Date.now();
+      document.head.appendChild(link);
+    })();
+  </script>
 </head>
 <body>
 
-  <!-- Scène WebGL 3D : Cortex & Neurones Projets -->
+  <!-- Scène WebGL 3D : Cortex & Amas de Micro-Neurones -->
   <div id="3d-graph"></div>
 
-  <!-- Barre supérieure : Connexion & Statut Global -->
+  <!-- Écran de première connexion (S'ouvre uniquement si aucune clé n'est en mémoire) -->
+  <div id="auth-overlay" class="auth-backdrop hidden">
+    <div class="auth-card hud-panel">
+      <div class="brand">
+        <span class="pulse-dot"></span>
+        INITIALISATION DU CORTEX V6.0
+      </div>
+      <p class="auth-desc">
+        Saisis tes identifiants une seule fois. La connexion sera automatique à chaque ouverture.
+      </p>
+
+      <div class="form-group">
+        <label>GitHub Personal Access Token (<code>repo</code>, <code>workflow</code>)</label>
+        <input type="password" id="gh-token-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" autocomplete="off" />
+      </div>
+
+      <div class="form-group">
+        <label>Clé API Gemini (AI Studio)</label>
+        <input type="password" id="gemini-key-input" placeholder="AIzaSyxxxxxxxxxxxxxxxxxx" autocomplete="off" />
+      </div>
+
+      <div class="form-group">
+        <label>Profil de sécurité de la machine</label>
+        <div class="device-mode-grid">
+          <label class="device-option selected" id="opt-main-pc">
+            <input type="radio" name="device-mode" value="local" checked />
+            <div>
+              <strong>🔒 PC Principal</strong>
+              <span>Garde les clés même après fermeture du navigateur (localStorage)</span>
+            </div>
+          </label>
+          <label class="device-option" id="opt-temp-pc">
+            <input type="radio" name="device-mode" value="session" />
+            <div>
+              <strong>⏳ PC Occasionnel</strong>
+              <span>Efface tout dès la fermeture de l'onglet/navigateur (sessionStorage)</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <button id="btn-auth-submit" class="btn-primary full-width">
+        Connecter et générer le réseau synaptique
+      </button>
+    </div>
+  </div>
+
+  <!-- Barre supérieure minimaliste (Sans bouton recadrer) -->
   <header id="top-bar" class="hud-panel">
     <div class="brand">
       <span class="pulse-dot"></span>
       NEURAL DEV HUB V6.0
     </div>
-    <input type="password" id="gh-token" placeholder="GitHub PAT (repo, workflow)" class="input-cred" />
-    <input type="password" id="gemini-key" placeholder="Gemini API Key" class="input-cred" />
-    <button id="btn-connect" onclick="connectAndBuildCortex()">Initialiser Cortex</button>
+
+    <span id="persistence-badge" class="mode-pill">DÉTECTION...</span>
+    <span id="camera-lock-hint" class="lock-pill hidden">🎯 FOCUS AMAS VERROUILLÉ — Appuie sur [ÉCHAP] pour libérer</span>
 
     <div class="top-controls">
       <label class="toggle-label">
@@ -30,28 +92,35 @@
       <label class="toggle-label">
         <input type="checkbox" id="auto-heal-toggle" checked /> Auto-Heal CI/CD (3 cycles)
       </label>
-      <button class="btn-ghost" onclick="resetCameraToCortex()">Recadrer (0,0,0)</button>
-      <span id="global-status" class="status-badge">OFFLINE</span>
+      <span id="global-status" class="status-badge">CONNEXION...</span>
+      <button id="btn-logout" class="btn-xs btn-danger-outline" title="Oublier les clés et changer de mode">
+        Déconnexion
+      </button>
     </div>
   </header>
 
-  <!-- Journal d'exécution en bas à gauche -->
+  <!-- Terminal de logs en bas à gauche -->
   <section id="log-drawer" class="hud-panel">
     <div class="section-header">
-      <span>TERMINAL SYSTÈME & FLUX AGENTIQUE</span>
-      <button class="btn-xs" onclick="clearTerminal()">Vider</button>
+      <span>FLUX SYNAPTIQUE & LOGS AGENTIQUES</span>
+      <button id="btn-clear-logs" class="btn-xs">Vider</button>
     </div>
     <div id="terminal"></div>
   </section>
 
-  <!-- Panneau Latéral Droit (ancré, pas un pop-up) : Affiché au clic sur un neurone projet -->
+  <!-- Panneau Latéral Projet (Ancré à droite, affiché au clic sur un amas de neurones) -->
   <aside id="project-sidebar" class="hud-panel hidden">
     <div class="sidebar-top">
       <div>
-        <h2 id="proj-title">NomDuProjet</h2>
+        <div class="cluster-badge-row">
+          <span id="proj-lang-dot" class="lang-dot"></span>
+          <h2 id="proj-title">NomDuProjet</h2>
+        </div>
         <div id="proj-meta" class="meta-line">branche: main • 0 étoiles</div>
       </div>
-      <button class="btn-close" onclick="closeProjectSidebar()" title="Fermer">✕</button>
+      <button id="btn-back-cortex" class="btn-back" title="Raccourci : Touche Échap">
+        ← Retour Cortex (Échap)
+      </button>
     </div>
 
     <p id="proj-desc" class="proj-description">Description du dépôt...</p>
@@ -63,75 +132,82 @@
         <span id="proj-last-commit" class="state-val">—</span>
       </div>
       <div class="state-card">
-        <span class="state-label">État GitHub Actions</span>
+        <span class="state-label">GitHub Actions</span>
         <span id="proj-ci-badge" class="state-val">Inconnu</span>
       </div>
       <div class="state-card">
         <span class="state-label">Branche active</span>
-        <input type="text" id="proj-branch-input" value="main" onchange="onBranchChange()" />
+        <input type="text" id="proj-branch-input" value="main" />
       </div>
     </div>
 
-    <!-- Navigation par onglets dans le panneau du projet -->
+    <!-- Navigation par onglets -->
     <div class="tabs-bar">
-      <button class="tab-btn active" onclick="switchSidebarTab('tab-agent', this)">1. Agent & Prompts</button>
-      <button class="tab-btn" onclick="switchSidebarTab('tab-files', this)">2. Fichiers (<span id="file-count">0</span>)</button>
-      <button class="tab-btn" onclick="switchSidebarTab('tab-backups', this)">3. Backups (<span id="backup-count">0</span>)</button>
+      <button class="tab-btn active" data-tab="tab-agent">1. Agent & Prompts</button>
+      <button class="tab-btn" data-tab="tab-files">2. Fichiers (<span id="file-count">0</span>)</button>
+      <button class="tab-btn" data-tab="tab-backups">3. Backups (<span id="backup-count">0</span>)</button>
     </div>
 
-    <!-- ONGLET 1 : Deux modes d'IA (Audit & Propositions vs Exécution Libre) -->
+    <!-- ONGLET 1 : Deux modes IA -->
     <div id="tab-agent" class="tab-content active">
       <div class="mode-selector">
-        <button id="mode-btn-exec" class="mode-btn active" onclick="setAgentMode('exec')">
+        <button id="mode-btn-exec" class="mode-btn active">
           ⚡ Demande Libre & Code (XML/CDATA)
         </button>
-        <button id="mode-btn-audit" class="mode-btn" onclick="setAgentMode('audit')">
-          🔍 Audit & Propositions d'Évolutions
+        <button id="mode-btn-audit" class="mode-btn">
+          🔍 État & Propositions d'Évolutions
         </button>
       </div>
 
-      <!-- Vue Mode A : Exécution Libre (Routing Flash -> Code Pro -> Backup -> Atomic Commit -> Auto-Heal) -->
+      <!-- Mode Exécution Libre -->
       <div id="view-mode-exec" class="mode-view">
         <div class="hint-box">
-          <strong>Pipeline V6.0 :</strong> Si aucun fichier n'est coché dans l'onglet Fichiers, <code>gemini-2.5-flash</code> sélectionne jusqu'à 8 fichiers via <code>&lt;path&gt;</code>, crée un tag <code>backup-pre-agent-...</code>, puis <code>gemini-2.5-pro</code> applique les modifications en XML/CDATA brut via un commit atomique.
+          <strong>Pipeline Autonome V6.0 :</strong> <code>gemini-2.5-flash</code> trie jusqu'à 8 fichiers utiles (<code>&lt;path&gt;</code>), crée un tag GitHub <code>backup-pre-agent-...</code>, puis <code>gemini-2.5-pro</code> modifie les fichiers en XML/CDATA brut via un commit atomique suivi de la boucle Auto-Heal CI/CD.
         </div>
-        <textarea id="custom-prompt" placeholder="Décris la modification, la nouvelle fonctionnalité ou le bug à corriger sur ce dépôt..."></textarea>
-        <button id="btn-run-exec" class="btn-primary full-width" onclick="runFreeExecutionPipeline()">
-          Lancer le Pipeline Autonome (Backup + Commit + CI)
+        <textarea id="custom-prompt" placeholder="Que veux-tu développer, modifier ou corriger dans ce projet ?"></textarea>
+        <button id="btn-run-exec" class="btn-primary full-width">
+          Exécuter la demande (Backup + Code XML + CI/CD)
         </button>
       </div>
 
-      <!-- Vue Mode B : Audit de l'état du projet et propositions d'améliorations -->
+      <!-- Mode Audit & Propositions -->
       <div id="view-mode-audit" class="mode-view hidden">
         <div class="hint-box">
-          <strong>Analyse Architecturale :</strong> L'IA inspecte l'arborescence et les fichiers clés du projet pour dresser un diagnostic technique et proposer des pistes d'évolution concrètes (sans modifier le dépôt).
+          <strong>Inspection & Améliorations :</strong> L'IA analyse les fichiers clés du dépôt et te propose un diagnostic de l'état actuel ainsi que des évolutions concrètes.
         </div>
-        <button id="btn-run-audit" class="btn-primary full-width" onclick="runProjectAudit()">
-          Analyser le dépôt et proposer des évolutions
+        <button id="btn-run-audit" class="btn-primary full-width">
+          Lancer l'audit et générer des propositions
         </button>
-        <div id="audit-output" class="audit-result">Aucune analyse effectuée pour le moment.</div>
+        <div id="audit-output" class="audit-result">Clique sur le bouton ci-dessus pour analyser ce projet.</div>
       </div>
     </div>
 
-    <!-- ONGLET 2 : Arborescence des fichiers avec cases à cocher -->
+    <!-- ONGLET 2 : Fichiers du dépôt -->
     <div id="tab-files" class="tab-content hidden">
       <div class="files-toolbar">
-        <input type="text" id="file-filter" placeholder="Filtrer les fichiers..." oninput="filterFileCheckboxes()" />
-        <button class="btn-xs" onclick="uncheckAllFiles()">Tout décocher (Auto-Flash)</button>
+        <input type="text" id="file-filter" placeholder="Filtrer les fichiers..." />
+        <button id="btn-uncheck-all" class="btn-xs">Tout décocher (Auto-Flash)</button>
       </div>
       <div id="file-checklist" class="checklist-container"></div>
     </div>
 
-    <!-- ONGLET 3 : Backups GitHub (Tags backup-pre-agent-...) & Restauration 1-clic -->
+    <!-- ONGLET 3 : Backups GitHub & Restauration -->
     <div id="tab-backups" class="tab-content hidden">
       <div class="backups-toolbar">
-        <span>Points de sauvegarde Git (Tags)</span>
-        <button class="btn-xs" onclick="createManualBackupTag()">+ Créer Backup maintenant</button>
+        <span>Sauvegardes GitHub (Tags)</span>
+        <button id="btn-manual-backup" class="btn-xs">+ Créer Backup</button>
       </div>
       <div id="backups-list" class="backups-container"></div>
     </div>
   </aside>
 
-  <script src="app.js"></script>
+  <!-- Chargeur JS anti-cache instantané -->
+  <script>
+    (function() {
+      const s = document.createElement('script');
+      s.src = 'app.js?v=' + Date.now();
+      document.body.appendChild(s);
+    })();
+  </script>
 </body>
 </html>
