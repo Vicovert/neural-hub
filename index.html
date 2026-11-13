@@ -3,49 +3,134 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Neural Dev Hub V6.0 - Autonomous Agentic IDE</title>
+  <title>Neural Dev Hub V6.0 - Cortex & Autonomous Agent</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
   <script src="https://unpkg.com/3d-force-graph@1.73.3/dist/3d-force-graph.min.js"></script>
 </head>
 <body>
 
-  <!-- Conteneur WebGL 3D -->
+  <!-- Scène WebGL 3D : Cortex & Neurones Projets -->
   <div id="3d-graph"></div>
 
-  <!-- Barre supérieure : Authentification et sélection du dépôt -->
-  <div id="top-bar" class="hud-panel">
-    <div class="brand">Neural Dev Hub V6.0</div>
-    <input type="password" id="gh-token" placeholder="GitHub PAT (repo, workflow)" class="input-credential" />
-    <input type="password" id="gemini-key" placeholder="Gemini API Key" class="input-credential" />
-    <button id="btn-connect" onclick="initHub()">Connecter</button>
-    
-    <select id="repo-select" onchange="loadRepoTree()" disabled>
-      <option value="">-- Sélectionner un dépôt --</option>
-    </select>
-    
-    <input type="text" id="branch-input" value="main" placeholder="Branche" class="input-branch" />
-    
-    <label class="checkbox-label">
-      <input type="checkbox" id="auto-heal-toggle" checked /> Auto-Heal CI/CD (Max 3)
-    </label>
-    
-    <span id="ci-status" class="status-badge">IDLE</span>
-  </div>
-
-  <!-- Panneau de pilotage et logs -->
-  <div id="control-panel" class="hud-panel">
-    <div class="panel-header">INSTRUCTION AGENTIQUE (ZÉRO-JSON XML)</div>
-    <textarea id="prompt-input" placeholder="Décris la fonctionnalité à développer, le bug à corriger ou le refactoring à exécuter..."></textarea>
-    
-    <div class="action-row">
-      <button id="btn-run" onclick="triggerAutonomousCycle()" class="btn-primary" disabled>Exécuter Mission Autonome</button>
-      <button onclick="recenterCortex()" class="btn-secondary">Focus CORTEX</button>
+  <!-- Barre supérieure : Connexion & Statut Global -->
+  <header id="top-bar" class="hud-panel">
+    <div class="brand">
+      <span class="pulse-dot"></span>
+      NEURAL DEV HUB V6.0
     </div>
-    
-    <div class="sub-header">FLUX D'EXÉCUTION & LOGS TEMPS RÉEL</div>
+    <input type="password" id="gh-token" placeholder="GitHub PAT (repo, workflow)" class="input-cred" />
+    <input type="password" id="gemini-key" placeholder="Gemini API Key" class="input-cred" />
+    <button id="btn-connect" onclick="connectAndBuildCortex()">Initialiser Cortex</button>
+
+    <div class="top-controls">
+      <label class="toggle-label">
+        <input type="checkbox" id="orbit-toggle" checked /> Orbite Synaptique
+      </label>
+      <label class="toggle-label">
+        <input type="checkbox" id="auto-heal-toggle" checked /> Auto-Heal CI/CD (3 cycles)
+      </label>
+      <button class="btn-ghost" onclick="resetCameraToCortex()">Recadrer (0,0,0)</button>
+      <span id="global-status" class="status-badge">OFFLINE</span>
+    </div>
+  </header>
+
+  <!-- Journal d'exécution en bas à gauche -->
+  <section id="log-drawer" class="hud-panel">
+    <div class="section-header">
+      <span>TERMINAL SYSTÈME & FLUX AGENTIQUE</span>
+      <button class="btn-xs" onclick="clearTerminal()">Vider</button>
+    </div>
     <div id="terminal"></div>
-  </div>
+  </section>
+
+  <!-- Panneau Latéral Droit (ancré, pas un pop-up) : Affiché au clic sur un neurone projet -->
+  <aside id="project-sidebar" class="hud-panel hidden">
+    <div class="sidebar-top">
+      <div>
+        <h2 id="proj-title">NomDuProjet</h2>
+        <div id="proj-meta" class="meta-line">branche: main • 0 étoiles</div>
+      </div>
+      <button class="btn-close" onclick="closeProjectSidebar()" title="Fermer">✕</button>
+    </div>
+
+    <p id="proj-desc" class="proj-description">Description du dépôt...</p>
+
+    <!-- État GitHub en direct -->
+    <div class="state-grid">
+      <div class="state-card">
+        <span class="state-label">Dernier Commit</span>
+        <span id="proj-last-commit" class="state-val">—</span>
+      </div>
+      <div class="state-card">
+        <span class="state-label">État GitHub Actions</span>
+        <span id="proj-ci-badge" class="state-val">Inconnu</span>
+      </div>
+      <div class="state-card">
+        <span class="state-label">Branche active</span>
+        <input type="text" id="proj-branch-input" value="main" onchange="onBranchChange()" />
+      </div>
+    </div>
+
+    <!-- Navigation par onglets dans le panneau du projet -->
+    <div class="tabs-bar">
+      <button class="tab-btn active" onclick="switchSidebarTab('tab-agent', this)">1. Agent & Prompts</button>
+      <button class="tab-btn" onclick="switchSidebarTab('tab-files', this)">2. Fichiers (<span id="file-count">0</span>)</button>
+      <button class="tab-btn" onclick="switchSidebarTab('tab-backups', this)">3. Backups (<span id="backup-count">0</span>)</button>
+    </div>
+
+    <!-- ONGLET 1 : Deux modes d'IA (Audit & Propositions vs Exécution Libre) -->
+    <div id="tab-agent" class="tab-content active">
+      <div class="mode-selector">
+        <button id="mode-btn-exec" class="mode-btn active" onclick="setAgentMode('exec')">
+          ⚡ Demande Libre & Code (XML/CDATA)
+        </button>
+        <button id="mode-btn-audit" class="mode-btn" onclick="setAgentMode('audit')">
+          🔍 Audit & Propositions d'Évolutions
+        </button>
+      </div>
+
+      <!-- Vue Mode A : Exécution Libre (Routing Flash -> Code Pro -> Backup -> Atomic Commit -> Auto-Heal) -->
+      <div id="view-mode-exec" class="mode-view">
+        <div class="hint-box">
+          <strong>Pipeline V6.0 :</strong> Si aucun fichier n'est coché dans l'onglet Fichiers, <code>gemini-2.5-flash</code> sélectionne jusqu'à 8 fichiers via <code>&lt;path&gt;</code>, crée un tag <code>backup-pre-agent-...</code>, puis <code>gemini-2.5-pro</code> applique les modifications en XML/CDATA brut via un commit atomique.
+        </div>
+        <textarea id="custom-prompt" placeholder="Décris la modification, la nouvelle fonctionnalité ou le bug à corriger sur ce dépôt..."></textarea>
+        <button id="btn-run-exec" class="btn-primary full-width" onclick="runFreeExecutionPipeline()">
+          Lancer le Pipeline Autonome (Backup + Commit + CI)
+        </button>
+      </div>
+
+      <!-- Vue Mode B : Audit de l'état du projet et propositions d'améliorations -->
+      <div id="view-mode-audit" class="mode-view hidden">
+        <div class="hint-box">
+          <strong>Analyse Architecturale :</strong> L'IA inspecte l'arborescence et les fichiers clés du projet pour dresser un diagnostic technique et proposer des pistes d'évolution concrètes (sans modifier le dépôt).
+        </div>
+        <button id="btn-run-audit" class="btn-primary full-width" onclick="runProjectAudit()">
+          Analyser le dépôt et proposer des évolutions
+        </button>
+        <div id="audit-output" class="audit-result">Aucune analyse effectuée pour le moment.</div>
+      </div>
+    </div>
+
+    <!-- ONGLET 2 : Arborescence des fichiers avec cases à cocher -->
+    <div id="tab-files" class="tab-content hidden">
+      <div class="files-toolbar">
+        <input type="text" id="file-filter" placeholder="Filtrer les fichiers..." oninput="filterFileCheckboxes()" />
+        <button class="btn-xs" onclick="uncheckAllFiles()">Tout décocher (Auto-Flash)</button>
+      </div>
+      <div id="file-checklist" class="checklist-container"></div>
+    </div>
+
+    <!-- ONGLET 3 : Backups GitHub (Tags backup-pre-agent-...) & Restauration 1-clic -->
+    <div id="tab-backups" class="tab-content hidden">
+      <div class="backups-toolbar">
+        <span>Points de sauvegarde Git (Tags)</span>
+        <button class="btn-xs" onclick="createManualBackupTag()">+ Créer Backup maintenant</button>
+      </div>
+      <div id="backups-list" class="backups-container"></div>
+    </div>
+  </aside>
 
   <script src="app.js"></script>
 </body>
