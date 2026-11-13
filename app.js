@@ -743,10 +743,10 @@ async function callGeminiWithFallback(model, apiKey, sysPrompt, userPrompt, sche
     })
   });
 
-  // Fallback automatique vers gemini-4-argon en cas de quota 429/503 ou 404
-  if ((res.status === 429 || res.status === 503 || res.status === 404) && model !== "gemini-4-argon") {
-    console.warn(`Erreur ${res.status} sur ${model}, bascule automatique sur gemini-4-argon...`);
-    return await callGeminiWithFallback("gemini-4-argon", apiKey, sysPrompt, userPrompt, schema);
+  // Fallback automatique vers gemini-3.8-flash en cas de quota 429/503 ou 404
+  if ((res.status === 429 || res.status === 503 || res.status === 404) && model !== "gemini-3.8-flash") {
+    console.warn(`Erreur ${res.status} sur ${model}, bascule automatique sur gemini-3.8-flash...`);
+    return await callGeminiWithFallback("gemini-3.8-flash", apiKey, sysPrompt, userPrompt, schema);
   }
 
   if (!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${await res.text()}`);
