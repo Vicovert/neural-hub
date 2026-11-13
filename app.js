@@ -1,5 +1,5 @@
 // ============================================================================
-// NEURAL DEV HUB V5.6 — AGENT AUTONOME (PATCH CHIRURGICAL & DIFF MULTI-FICHIERS)
+// NEURAL DEV HUB V5.7 — AGENT AUTONOME + BACKUPS GIT AUTOMATIQUES & RESTAURATION
 // ============================================================================
 
 let graph3D = null;
@@ -316,7 +316,7 @@ function buildBrainGraph(owner, repos) {
 }
 
 // ============================================================================
-// 4. OUVERTURE DU HUD PROJET (SANTÉ, ACTIONS, METRICS, ARBRE GIT)
+// 4. OUVERTURE DU HUD PROJET (SANTÉ, ACTIONS, BACKUPS GIT, ARBRE GIT)
 // ============================================================================
 async function openProjectHud(repo) {
   currentRepo = repo;
@@ -335,6 +335,7 @@ async function openProjectHud(repo) {
   checkSiteLiveStatus(repo);
   loadWorkflowRunsAndDiagnostics(repo);
   loadLastCommitInfo(repo);
+  loadBackupSnapshots(repo);
   await loadRepositoryTree(repo);
   loadMetricsJson(repo);
 }
@@ -518,6 +519,146 @@ async function loadLastCommitInfo(repo) {
   `;
 }
 
+// ============================================================================
+// 4B. SYSTÈME DE BACKUP AUTOMATIQUE PAR TAGS GIT & RESTAURATION EN 1 CLIC
+// ============================================================================
+function generateBackupTagName(prefix = "backup") {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `${prefix}-${stamp}`;
+}
+
+async function createGitBackupSnapshot(owner, repoName, commitSha, tagPrefix = "backup") {
+  const tagName = generateBackupTagName(tagPrefix);
+  const res = await ghFetch(`/repos/${owner}/${repoName}/git/refs`, {
+    method: "POST",
+    body: JSON.stringify({
+      ref: `refs/tags/${tagName}`,
+      sha: commitSha
+    })
+  });
+  if (!res.ok) {
+    console.warn("Impossible de créer le tag de sauvegarde :", await res.text());
+    return null;
+  }
+  return tagName;
+}
+
+async function createManualBackupSnapshot() {
+  if (!currentRepo) return;
+  try {
+    const owner = currentRepo.owner.login;
+    const repo = currentRepo.name;
+    const branch = currentRepo.default_branch;
+
+    const refRes = await ghFetch(`/repos/${owner}/${repo}/git/ref/heads/${branch}`);
+    if (!refRes.ok) return alert("Dépôt vide : rien à sauvegarder.");
+    const refData = await refRes.json();
+
+    const tag = await createGitBackupSnapshot(owner, repo, refData.object.sha, "backup-manuel");
+    if (tag) {
+      alert(`Point de sauvegarde créé : ${tag}`);
+      loadBackupSnapshots(currentRepo);
+    }
+  } catch (e) {
+    alert(`Erreur création backup : ${e.message}`);
+  }
+}
+
+async function loadBackupSnapshots(repo) {
+  const listEl = document.getElementById("hud-backups-list");
+  listEl.innerHTML = "Recherche des sauvegardes...";
+
+  try {
+    const res = await ghFetch(`/repos/${repo.owner.login}/${repo.name}/git/matching-refs/tags/backup`);
+    if (!res.ok) {
+      listEl.innerHTML = `<div class="text-[11px] text-slate-500">Aucune sauvegarde disponible.</div>`;
+      return;
+    }
+    const refs = await res.json();
+    if (!Array.isArray(refs) || refs.length === 0) {
+      listEl.innerHTML = `<div class="text-[11px] text-slate-500">Aucune backup enregistrée (une backup sera créée automatiquement à ta prochaine modification).</div>`;
+      return;
+    }
+
+    const latestBackups = refs.slice(-6).reverse();
+    let html = "";
+
+    for (const r of latestBackups) {
+      const tagName = r.ref.replace("refs/tags/", "");
+      const sha = r.object.sha;
+      let commitMsg = `Commit ${sha.slice(0, 7)}`;
+      try {
+        const cRes = await ghFetch(`/repos/${repo.owner.login}/${repo.name}/git/commits/${sha}`);
+        if (cRes.ok) {
+          const cData = await cRes.json();
+          commitMsg = cData.message.split("\n")[0];
+        }
+      } catch {}
+
+      html += `
+        <div class="flex items-center justify-between gap-2 bg-slate-950/70 px-2.5 py-1.5 rounded border border-slate-800">
+          <div class="min-w-0">
+            <div class="font-mono text-[10px] text-cyan-300 font-bold truncate">${escapeHtml(tagName)}</div>
+            <div class="text-[10px] text-slate-400 truncate">${escapeHtml(commitMsg)} (${sha.slice(0, 7)})</div>
+          </div>
+          <button onclick="restoreFromBackupTag('${escapeHtml(tagName)}', '${sha}')" class="shrink-0 text-[10px] bg-emerald-950 hover:bg-emerald-800 text-emerald-300 px-2 py-1 rounded border border-emerald-500/30 font-semibold transition">
+            Restaurer
+          </button>
+        </div>
+      `;
+    }
+    listEl.innerHTML = html;
+  } catch (e) {
+    listEl.innerHTML = `<div class="text-[11px] text-rose-400">Erreur lecture backups : ${e.message}</div>`;
+  }
+}
+
+async function restoreFromBackupTag(tagName, targetCommitSha) {
+  if (!currentRepo) return;
+  if (!confirm(`Restaurer '${currentRepo.name}' exactement à l'état de la sauvegarde '${tagName}' ?\n\nUne sauvegarde de ton état actuel sera également prise avant la restauration.`)) return;
+
+  try {
+    const owner = currentRepo.owner.login;
+    const repo = currentRepo.name;
+    const branch = currentRepo.default_branch;
+
+    const headRes = await ghFetch(`/repos/${owner}/${repo}/git/ref/heads/${branch}`);
+    const headData = await headRes.json();
+    const currentHeadSha = headData.object.sha;
+
+    // Backup de sécurité de l'état actuel avant restauration
+    await createGitBackupSnapshot(owner, repo, currentHeadSha, "backup-avant-restore");
+
+    const targetCommitRes = await ghFetch(`/repos/${owner}/${repo}/git/commits/${targetCommitSha}`);
+    if (!targetCommitRes.ok) throw new Error("Impossible de lire le commit de sauvegarde.");
+    const targetCommit = await targetCommitRes.json();
+
+    const restoreCommitRes = await ghFetch(`/repos/${owner}/${repo}/git/commits`, {
+      method: "POST",
+      body: JSON.stringify({
+        message: `Restauration depuis sauvegarde ${tagName} (${targetCommitSha.slice(0, 7)})`,
+        tree: targetCommit.tree.sha,
+        parents: [currentHeadSha]
+      })
+    });
+    if (!restoreCommitRes.ok) throw new Error(await restoreCommitRes.text());
+    const newCommit = await restoreCommitRes.json();
+
+    const patchRef = await ghFetch(`/repos/${owner}/${repo}/git/refs/heads/${branch}`, {
+      method: "PATCH",
+      body: JSON.stringify({ sha: newCommit.sha, force: false })
+    });
+    if (!patchRef.ok) throw new Error(await patchRef.text());
+
+    alert(`Dépôt restauré à l'état '${tagName}' !`);
+    refreshCurrentProject();
+  } catch (e) {
+    alert(`Erreur lors de la restauration : ${e.message}`);
+  }
+}
+
 async function rollbackLastCommit() {
   if (!currentRepo) return;
   if (!confirm(`Voulez-vous créer un commit de restauration vers l'état précédant le dernier commit sur ${currentRepo.name} ?`)) return;
@@ -534,6 +675,8 @@ async function rollbackLastCommit() {
     }
     const latestCommitSha = commits[0].sha;
     const parentTreeSha = commits[1].commit.tree.sha;
+
+    await createGitBackupSnapshot(owner, repo, latestCommitSha, "backup-avant-rollback");
 
     const newCommitRes = await ghFetch(`/repos/${owner}/${repo}/git/commits`, {
       method: "POST",
@@ -652,7 +795,6 @@ async function gatherSelectedContext(repo, isForCodeGeneration = false) {
   for (const p of checkedPaths) {
     try {
       const code = await fetchFileContent(repo, p);
-      // En génération de code, on envoie toujours le fichier complet (même 2000 lignes) pour des patchs exacts
       const contentToInclude = (!isForCodeGeneration && code.length > 25000)
         ? code.slice(0, 25000) + "\n// [APERÇU AUDIT]"
         : code;
@@ -913,8 +1055,6 @@ const AUDIT_SCHEMA = {
   required: ["architecture_summary", "how_it_works", "improvements"]
 };
 
-// Schéma chirurgical : l'agent ne régénère JAMAIS les gros fichiers existants en entier,
-// il fournit des blocs exacts { search, replace } comme Antigravity / Claude Code.
 const PATCH_CHANGES_SCHEMA = {
   type: "OBJECT",
   properties: {
@@ -1056,7 +1196,6 @@ function applySelectedImprovements() {
     `Applique conjointement les améliorations suivantes en veillant à leur cohérence globale :\n\n${combinedPrompt}`;
 }
 
-// Applique les blocs Search & Replace avec normalisation souple des fins de ligne (\r\n vs \n)
 function applySurgicalHunks(originalContent, hunks, filePath) {
   let updated = originalContent.replace(/\r\n/g, "\n");
   for (let i = 0; i < hunks.length; i++) {
@@ -1171,9 +1310,9 @@ RÈGLES STRICTES :
 }
 
 // ============================================================================
-// 8. COMMIT ATOMIQUE MULTI-FICHIERS (GIT DATA API + BASE_TREE + FALLBACK WORKFLOW)
+// 8. COMMIT ATOMIQUE MULTI-FICHIERS AVEC BACKUP AUTOMATIQUE PRÉALABLE
 // ============================================================================
-async function commitFilesAtomically(owner, repoName, branch, commitMessage, filesArray, isEmptyRepo = false) {
+async function commitFilesAtomically(owner, repoName, branch, commitMessage, filesArray, isEmptyRepo = false, autoBackup = true) {
   if (isEmptyRepo) {
     const first = filesArray.find(f => f.action !== "delete") || { path: "README.md", content: `# ${repoName}` };
     const initRes = await ghFetch(`/repos/${owner}/${repoName}/contents/${encodeURIComponent(first.path)}`, {
@@ -1191,6 +1330,14 @@ async function commitFilesAtomically(owner, repoName, branch, commitMessage, fil
   if (!refRes.ok) throw new Error(`Impossible de lire refs/heads/${branch} : ${await refRes.text()}`);
   const refData = await refRes.json();
   const latestCommitSha = refData.object.sha;
+
+  // Création systématique d'une sauvegarde Git avant toute écriture de code ou workflow
+  let createdBackupTag = null;
+  if (autoBackup && !isEmptyRepo) {
+    const hasWorkflowChange = filesArray.some(f => f.path.startsWith(".github/workflows"));
+    const tagPrefix = hasWorkflowChange ? "backup-wf" : "backup";
+    createdBackupTag = await createGitBackupSnapshot(owner, repoName, latestCommitSha, tagPrefix);
+  }
 
   const commitRes = await ghFetch(`/repos/${owner}/${repoName}/git/commits/${latestCommitSha}`);
   const commitData = await commitRes.json();
@@ -1240,7 +1387,7 @@ async function commitFilesAtomically(owner, repoName, branch, commitMessage, fil
     }
     throw new Error(`Erreur mise à jour branche : ${errText}`);
   }
-  return newCommit.sha;
+  return { commitSha: newCommit.sha, backupTag: createdBackupTag };
 }
 
 async function commitStagedChanges() {
@@ -1248,18 +1395,20 @@ async function commitStagedChanges() {
   const btn = document.getElementById("btn-commit-push");
   const msg = document.getElementById("hud-commit-msg").value.trim() || "Update via Neural Dev Hub";
   btn.disabled = true;
-  btn.textContent = "Push du commit atomique en cours...";
+  btn.textContent = "Création Backup & Push en cours...";
 
   try {
-    await commitFilesAtomically(
+    const result = await commitFilesAtomically(
       currentRepo.owner.login,
       currentRepo.name,
       currentRepo.default_branch,
       msg,
       stagedChanges.files,
-      currentRepoIsEmpty
+      currentRepoIsEmpty,
+      true
     );
-    alert("Commit poussé avec succès sur GitHub !");
+    const backupNote = result.backupTag ? `\nSauvegarde créée : ${result.backupTag}` : "";
+    alert(`Commit poussé avec succès sur GitHub !${backupNote}`);
     refreshCurrentProject();
   } catch (e) {
     if (String(e.message).startsWith("WORKFLOW_SCOPE_MISSING:")) {
@@ -1268,8 +1417,8 @@ async function commitStagedChanges() {
       );
       if (retryWithoutWf) {
         const filtered = stagedChanges.files.filter(f => !f.path.startsWith(".github/workflows"));
-        await commitFilesAtomically(currentRepo.owner.login, currentRepo.name, currentRepo.default_branch, msg, filtered, currentRepoIsEmpty);
-        alert("Code poussé avec succès (hors fichier workflow) !");
+        const res = await commitFilesAtomically(currentRepo.owner.login, currentRepo.name, currentRepo.default_branch, msg, filtered, currentRepoIsEmpty, false);
+        alert(`Code poussé avec succès (hors fichier workflow) !`);
         refreshCurrentProject();
       }
     } else {
@@ -1277,7 +1426,7 @@ async function commitStagedChanges() {
     }
   } finally {
     btn.disabled = false;
-    btn.textContent = "2. Valider & Pousser le Commit sur GitHub";
+    btn.textContent = "2. Créer Backup Auto & Pousser sur GitHub";
   }
 }
 
@@ -1334,13 +1483,14 @@ async function createRepoFromPrompt() {
         newRepo.default_branch,
         generated.commit_message || "Initialisation complète via Neural Dev Hub",
         generated.files,
-        false
+        false,
+        true
       );
     } catch (e) {
       if (String(e.message).startsWith("WORKFLOW_SCOPE_MISSING:")) {
         logEl.textContent += `⚠️ Scope 'workflow' absent sur le token : commit du code sans .github/workflows...\n`;
         const noWf = generated.files.filter(f => !f.path.startsWith(".github/workflows"));
-        await commitFilesAtomically(newRepo.owner.login, newRepo.name, newRepo.default_branch, "Initial commit", noWf, false);
+        await commitFilesAtomically(newRepo.owner.login, newRepo.name, newRepo.default_branch, "Initial commit", noWf, false, false);
       } else {
         throw e;
       }
