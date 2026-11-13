@@ -7,9 +7,9 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>Neural Dev Hub V6.0 - Cortex Synaptique</title>
+  <title>Neural Dev Hub V6.0 - Cortex Synaptique Autonome</title>
 
-  <!-- Import unique de Three.js + 3d-force-graph -->
+  <!-- Import Three.js + 3d-force-graph -->
   <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
   <script src="https://unpkg.com/3d-force-graph@1.73.3/dist/3d-force-graph.min.js"></script>
 
@@ -18,17 +18,21 @@
     (function() {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
-      link.href = 'style.css?v=' + Date.now();
+      link.id = 'main-stylesheet';
+      link.href = './style.css?v=' + Date.now();
       document.head.appendChild(link);
     })();
   </script>
 </head>
 <body>
 
-  <!-- Scène WebGL 3D : Cortex & Amas de Micro-Neurones -->
+  <!-- Bannière d'auto-diagnostic (S'affiche uniquement en cas de problème de chargement CSS/JS) -->
+  <div id="boot-diag" style="display:none; position:fixed; top:0; left:0; right:0; background:#7f1d1d; color:#fff; padding:12px 18px; font-family:monospace; font-size:13px; border-bottom:2px solid #ef4444; z-index:9999;"></div>
+
+  <!-- Scène WebGL 3D : Cortex Central & Amas de Micro-Neurones -->
   <div id="3d-graph"></div>
 
-  <!-- Écran de première connexion (S'ouvre uniquement si aucune clé n'est en mémoire) -->
+  <!-- Écran d'authentification (S'ouvre uniquement si aucune clé n'est détectée ou via le bouton Clés API) -->
   <div id="auth-overlay" class="auth-backdrop hidden">
     <div class="auth-card hud-panel">
       <div class="brand">
@@ -36,64 +40,80 @@
         INITIALISATION DU CORTEX V6.0
       </div>
       <p class="auth-desc">
-        Saisis tes identifiants une seule fois. La connexion sera automatique à chaque ouverture.
+        Entre tes clés d'API. La connexion est automatique à chaque ouverture tant que la session est active.
       </p>
 
       <div class="form-group">
-        <label>GitHub Personal Access Token (<code>repo</code>, <code>workflow</code>)</label>
+        <label>GitHub Personal Access Token (droits <code>repo</code> et <code>workflow</code>)</label>
         <input type="password" id="gh-token-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" autocomplete="off" />
       </div>
 
       <div class="form-group">
-        <label>Clé API Gemini (AI Studio)</label>
+        <label>Clé API Google Gemini (AI Studio)</label>
         <input type="password" id="gemini-key-input" placeholder="AIzaSyxxxxxxxxxxxxxxxxxx" autocomplete="off" />
       </div>
 
       <div class="form-group">
-        <label>Profil de sécurité de la machine</label>
+        <label>Profil de persistance de cet ordinateur</label>
         <div class="device-mode-grid">
           <label class="device-option selected" id="opt-main-pc">
             <input type="radio" name="device-mode" value="local" checked />
             <div>
               <strong>🔒 PC Principal</strong>
-              <span>Garde les clés même après fermeture du navigateur (localStorage)</span>
+              <span>Conserve les clés après fermeture du navigateur (localStorage)</span>
             </div>
           </label>
           <label class="device-option" id="opt-temp-pc">
             <input type="radio" name="device-mode" value="session" />
             <div>
               <strong>⏳ PC Occasionnel</strong>
-              <span>Efface tout dès la fermeture de l'onglet/navigateur (sessionStorage)</span>
+              <span>Efface tout dès la fermeture du navigateur (sessionStorage)</span>
             </div>
           </label>
         </div>
       </div>
 
-      <button id="btn-auth-submit" class="btn-primary full-width">
-        Connecter et générer le réseau synaptique
-      </button>
+      <div class="auth-actions">
+        <button id="btn-auth-cancel" class="btn-xs hidden">Annuler</button>
+        <button id="btn-auth-submit" class="btn-primary full-width">
+          Connecter et générer le réseau synaptique
+        </button>
+      </div>
     </div>
   </div>
 
-  <!-- Barre supérieure minimaliste (Sans bouton recadrer) -->
+  <!-- Barre supérieure (Sans bouton recadrer : tout est centré automatiquement) -->
   <header id="top-bar" class="hud-panel">
     <div class="brand">
       <span class="pulse-dot"></span>
-      NEURAL DEV HUB V6.0
+      NEURAL DEV HUB <span class="version-tag">V6.0 XML-ENGINE</span>
     </div>
 
     <span id="persistence-badge" class="mode-pill">DÉTECTION...</span>
-    <span id="camera-lock-hint" class="lock-pill hidden">🎯 FOCUS AMAS VERROUILLÉ — Appuie sur [ÉCHAP] pour libérer</span>
+    <span id="camera-lock-hint" class="lock-pill hidden">🎯 FOCUS AMAS VERROUILLÉ — [ÉCHAP] pour revenir au Cortex</span>
 
     <div class="top-controls">
+      <label class="ctrl-select-group" title="Modèle principal pour la génération de code et l'audit">
+        <span>Modèle :</span>
+        <select id="agent-model-select">
+          <option value="gemini-2.5-pro" selected>Gemini 2.5 Pro (Architecte & Code)</option>
+          <option value="gemini-2.5-flash">Gemini 2.5 Flash (Rapide)</option>
+          <option value="gemini-1.5-pro">Gemini 1.5 Pro (Fallback)</option>
+        </select>
+      </label>
+
       <label class="toggle-label">
         <input type="checkbox" id="orbit-toggle" checked /> Orbite Synaptique
       </label>
-      <label class="toggle-label">
-        <input type="checkbox" id="auto-heal-toggle" checked /> Auto-Heal CI/CD (3 cycles)
+
+      <label class="toggle-label" title="Récupère les logs GitHub Actions en cas d'échec et relance l'agent automatiquement">
+        <input type="checkbox" id="auto-heal-toggle" checked /> Auto-Heal CI/CD (Max 3)
       </label>
+
       <span id="global-status" class="status-badge">CONNEXION...</span>
-      <button id="btn-logout" class="btn-xs btn-danger-outline" title="Oublier les clés et changer de mode">
+
+      <button id="btn-open-settings" class="btn-xs" title="Modifier les clés ou le mode PC">⚙️ Clés</button>
+      <button id="btn-logout" class="btn-xs btn-danger-outline" title="Effacer les clés de ce navigateur">
         Déconnexion
       </button>
     </div>
@@ -102,7 +122,10 @@
   <!-- Terminal de logs en bas à gauche -->
   <section id="log-drawer" class="hud-panel">
     <div class="section-header">
-      <span>FLUX SYNAPTIQUE & LOGS AGENTIQUES</span>
+      <div class="header-left">
+        <span>FLUX SYNAPTIQUE & LOGS AGENTIQUES</span>
+        <span id="agent-step-indicator" class="step-pill">Prêt</span>
+      </div>
       <button id="btn-clear-logs" class="btn-xs">Vider</button>
     </div>
     <div id="terminal"></div>
@@ -148,7 +171,7 @@
       <button class="tab-btn" data-tab="tab-backups">3. Backups (<span id="backup-count">0</span>)</button>
     </div>
 
-    <!-- ONGLET 1 : Deux modes IA -->
+    <!-- ONGLET 1 : Deux modes IA (Demande libre vs Audit & Propositions) -->
     <div id="tab-agent" class="tab-content active">
       <div class="mode-selector">
         <button id="mode-btn-exec" class="mode-btn active">
@@ -162,31 +185,37 @@
       <!-- Mode Exécution Libre -->
       <div id="view-mode-exec" class="mode-view">
         <div class="hint-box">
-          <strong>Pipeline Autonome V6.0 :</strong> <code>gemini-2.5-flash</code> trie jusqu'à 8 fichiers utiles (<code>&lt;path&gt;</code>), crée un tag GitHub <code>backup-pre-agent-...</code>, puis <code>gemini-2.5-pro</code> modifie les fichiers en XML/CDATA brut via un commit atomique suivi de la boucle Auto-Heal CI/CD.
+          <strong>Pipeline V6.0 :</strong> <code>gemini-2.5-flash</code> trie les fichiers utiles (<code>&lt;path&gt;</code>), crée un tag GitHub <code>backup-pre-agent-...</code>, puis le modèle principal applique les changements en XML/CDATA brut (sans limite de lignes) via un commit atomique suivi de l'Auto-Heal CI/CD.
         </div>
-        <textarea id="custom-prompt" placeholder="Que veux-tu développer, modifier ou corriger dans ce projet ?"></textarea>
-        <button id="btn-run-exec" class="btn-primary full-width">
-          Exécuter la demande (Backup + Code XML + CI/CD)
-        </button>
+        <textarea id="custom-prompt" placeholder="Décris la fonctionnalité, l'optimisation ou le bug à résoudre. L'agent explore l'arborescence, coche les fichiers requis, écrit le code en XML brut, pousse un commit atomique et vérifie la CI..."></textarea>
+        <div class="exec-actions-row">
+          <button id="btn-run-exec" class="btn-primary full-width">
+            ⚡ Lancer le Pipeline Autonome (Backup + Code XML + CI/CD)
+          </button>
+          <button id="btn-stop-agent" class="btn-danger hidden">
+            ⏹ Stopper
+          </button>
+        </div>
       </div>
 
       <!-- Mode Audit & Propositions -->
       <div id="view-mode-audit" class="mode-view hidden">
         <div class="hint-box">
-          <strong>Inspection & Améliorations :</strong> L'IA analyse les fichiers clés du dépôt et te propose un diagnostic de l'état actuel ainsi que des évolutions concrètes.
+          <strong>Inspection & Améliorations :</strong> L'IA analyse les fichiers clés du dépôt et te dresse un bilan de l'état actuel ainsi que des propositions d'évolutions concrètes (sans modifier le code).
         </div>
         <button id="btn-run-audit" class="btn-primary full-width">
-          Lancer l'audit et générer des propositions
+          🔍 Analyser l'état du projet et proposer des améliorations
         </button>
         <div id="audit-output" class="audit-result">Clique sur le bouton ci-dessus pour analyser ce projet.</div>
       </div>
     </div>
 
-    <!-- ONGLET 2 : Fichiers du dépôt -->
+    <!-- ONGLET 2 : Fichiers du dépôt (Filtrés sans binaires, avec taille en Ko) -->
     <div id="tab-files" class="tab-content hidden">
       <div class="files-toolbar">
         <input type="text" id="file-filter" placeholder="Filtrer les fichiers..." />
         <button id="btn-uncheck-all" class="btn-xs">Tout décocher (Auto-Flash)</button>
+        <button id="btn-refresh-tree" class="btn-xs" title="Rafraîchir l'arborescence">🔄</button>
       </div>
       <div id="file-checklist" class="checklist-container"></div>
     </div>
@@ -194,18 +223,40 @@
     <!-- ONGLET 3 : Backups GitHub & Restauration -->
     <div id="tab-backups" class="tab-content hidden">
       <div class="backups-toolbar">
-        <span>Sauvegardes GitHub (Tags)</span>
+        <span>Points de restauration Git (Tags)</span>
         <button id="btn-manual-backup" class="btn-xs">+ Créer Backup</button>
       </div>
       <div id="backups-list" class="backups-container"></div>
     </div>
   </aside>
 
-  <!-- Chargeur JS anti-cache instantané -->
+  <!-- Chargeur JS anti-cache instantané + Vérificateur d'intégrité -->
   <script>
     (function() {
       const s = document.createElement('script');
-      s.src = 'app.js?v=' + Date.now();
+      s.src = './app.js?v=' + Date.now();
+      s.onload = function() {
+        setTimeout(function() {
+          const diag = document.getElementById('boot-diag');
+          const errors = [];
+          const bg = window.getComputedStyle(document.body).backgroundColor;
+          if (bg === 'rgba(0, 0, 0, 0)' || bg === 'rgb(255, 255, 255)') {
+            errors.push('❌ style.css non chargé. Vérifie que le fichier se nomme exactement "style.css".');
+          }
+          if (!window.__NDH_BOOTED__) {
+            errors.push('❌ app.js a rencontré une erreur au démarrage.');
+          }
+          if (errors.length > 0) {
+            diag.style.display = 'block';
+            diag.innerHTML = errors.join('<br>');
+          }
+        }, 300);
+      };
+      s.onerror = function() {
+        const diag = document.getElementById('boot-diag');
+        diag.style.display = 'block';
+        diag.innerHTML = '❌ Impossible de charger app.js. Vérifie que "app.js" est bien au même niveau que index.html.';
+      };
       document.body.appendChild(s);
     })();
   </script>
