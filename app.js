@@ -644,14 +644,16 @@ async function previewRepoFile(path) {
   }
 }
 
-async function gatherSelectedContext(repo) {
-  const checkedPaths = Array.from(document.querySelectorAll(".ctx-file-cb:checked")).map(cb => cb.value).slice(0, 4);
+async function gatherSelectedContext(repo, isForCodeGeneration = false) {
+  const checkedPaths = Array.from(document.querySelectorAll(".ctx-file-cb:checked")).map(cb => cb.value).slice(0, 6);
   let bundle = `PROJET : ${repo.name}\nARBORESCENCE :\n${currentRepoTree.slice(0, 40).map(f => "- " + f.path).join("\n")}\n\n`;
   for (const p of checkedPaths) {
     try {
       const code = await fetchFileContent(repo, p);
-      const trimmed = code.length > 12000 ? code.slice(0, 12000) + "\n// [TRONQUÉ POUR QUOTA GRATUIT]" : code;
-      bundle += `\n=== FICHIER : ${p} ===\n${trimmed}\n`;
+      const contentToInclude = (!isForCodeGeneration && code.length > 12000)
+        ? code.slice(0, 12000) + "\n// [TRONQUÉ POUR AUDIT]"
+        : code;
+      bundle += `\n=== FICHIER : ${p} ===\n${contentToInclude}\n`;
     } catch {}
   }
   return bundle;
@@ -677,9 +679,19 @@ async function detectLocalOllama() {
 function sanitizeJsonResponse(raw) {
   let cleaned = (raw || "").trim();
   cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  const match = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (match) cleaned = match[1].trim();
-  return JSON.parse(cleaned);
+
+  // Extrait le bloc entre la première accolade ouvrante et la dernière accolade fermante
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+  }
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (err) {
+    throw new Error(`Réponse IA tronquée ou malformée (demande moins de fichiers à la fois ou utilise un modèle avec plus de tokens de sortie). Détail : ${err.message}`);
+  }
 }
 
 function cancelRetryLoop() {
@@ -818,7 +830,7 @@ async function callSelectedAgent(systemInstruction, userPrompt, schema = null) {
 async function callGeminiWithUserChoice(model, apiKey, sysPrompt, userPrompt, schema, autoWaitMode = false) {
   const generationConfig = {
     temperature: 0.15,
-    maxOutputTokens: 8192,
+    maxOutputTokens: 32768,
     responseMimeType: "application/json"
   };
   if (schema) generationConfig.responseSchema = schema;
@@ -931,7 +943,7 @@ async function analyzeCurrentRepo() {
   out.innerHTML = "Lecture des fichiers et génération de l'audit technique...";
 
   try {
-    const context = await gatherSelectedContext(currentRepo);
+    const context = await gatherSelectedContext(currentRepo, true);
     const sys = `Tu es un ingénieur logiciel senior. Analyse ce dépôt Git sans complaisance. Explique clairement ce que fait le code et propose 3 à 4 améliorations concrètes. Réponds en français au format JSON demandé.`;
     const result = await callSelectedAgent(sys, context, AUDIT_SCHEMA);
     lastAuditImprovements = result.improvements || [];
