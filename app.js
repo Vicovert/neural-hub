@@ -805,9 +805,53 @@ async function previewRepoFile(path) {
 }
 
 async function gatherSelectedContext(repo, isForCodeGeneration = false) {
-  const checkedPaths = Array.from(document.querySelectorAll(".ctx-file-cb:checked")).map(cb => cb.value).slice(0, 10);
+  // 1. Récupération de tous les fichiers texte valides du dépôt
+  const allFiles = currentRepoTree.filter(f => isUsefulTextFile(f.path, f.size));
+  const fileListText = allFiles.map(f => `- ${f.path} (${((f.size || 0) / 1024).toFixed(1)} Ko)`).join("\n");
+
+  const promptText = document.getElementById("hud-prompt-input").value.trim();
+
+  // 2. Appel à un modèle rapide et léger (Flash-Lite) pour identifier les fichiers strictement nécessaires
+  const selectorSys = `Tu es un assistant de filtrage de code. À partir de la liste des fichiers du projet et d'une instruction utilisateur, identifie les chemins (paths) exacts des fichiers indispensables à modifier ou consulter. Réponds UNIQUEMENT sous forme d'un objet JSON valide avec la structure : { "selected_paths": ["chemin/vers/fichier1.py", "chemin/vers/fichier2.py"] }`;
+  
+  const selectorUser = `PROJET : ${repo.name}\nFICHIERS DISPONIBLES :\n${fileListText}\n\nINSTRUCTION :\n${promptText}`;
+
+  let selectedPaths = [];
+  try {
+    // On force l'utilisation du modèle léger pour le tri automatique
+    const creds = getCreds();
+    const routerRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${creds.geminiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: selectorSys }] },
+        contents: [{ role: "user", parts: [{ text: selectorUser }] }],
+        generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
+      })
+    });
+    
+    if (routerRes.ok) {
+      const data = await routerRes.json();
+      const parsed = sanitizeJsonResponse(data.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+      selectedPaths = parsed.selected_paths || [];
+    }
+  } catch (e) {
+    console.warn("Échec du tri automatique par le modèle léger, repli sur les 5 premiers fichiers utiles :", e);
+  }
+
+  // Si le modèle léger n'a rien retourné, on prend par défaut les fichiers les plus pertinents (ex: router.py, app.py, etc.)
+  if (selectedPaths.length === 0) {
+    selectedPaths = allFiles.slice(0, 5).map(f => f.path);
+  }
+
+  // Mise à jour visuelle des cases à cocher dans l'UI pour que tu voies ce que l'agent a sélectionné
+  document.querySelectorAll(".ctx-file-cb").forEach(cb => {
+    cb.checked = selectedPaths.includes(cb.value);
+  });
+
+  // 3. Construction du bundle final avec les fichiers sélectionnés automatiquement
   let bundle = `PROJET : ${repo.name}\nARBORESCENCE COMPLÈTE :\n${currentRepoTree.map(f => "- " + f.path).join("\n")}\n\n`;
-  for (const p of checkedPaths) {
+  for (const p of selectedPaths) {
     try {
       const code = await fetchFileContent(repo, p);
       const contentToInclude = (!isForCodeGeneration && code.length > 25000)
