@@ -300,6 +300,36 @@
     </div>
   </aside>
 
+  <!-- Panneau de décision en cas de saturation API (503 / 429) -->
+  <aside id="rate-limit-panel" class="fixed bottom-4 left-4 z-40 w-[460px] max-w-[94vw] glass rounded-2xl p-4 hidden border border-amber-500/50">
+    <div class="flex items-start justify-between gap-2 mb-2">
+      <div class="flex items-center gap-2">
+        <span class="h-2.5 w-2.5 rounded-full bg-amber-400 animate-ping"></span>
+        <h3 id="rl-title" class="text-xs font-bold uppercase tracking-wider text-amber-300">Serveur IA saturé (HTTP 503)</h3>
+      </div>
+      <button onclick="cancelRetryLoop()" class="text-slate-400 hover:text-white text-xs">Annuler ✕</button>
+    </div>
+
+    <p id="rl-desc" class="text-[11px] text-slate-300 leading-relaxed mb-3"></p>
+
+    <div class="space-y-2 text-xs">
+      <button id="btn-rl-wait" onclick="startActiveWaitLoop()" class="w-full text-left p-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 transition">
+        <div class="font-bold text-amber-200">1. Patienter et conserver la qualité maximale</div>
+        <div id="rl-wait-sub" class="text-[10px] text-slate-300 mt-0.5">Relance automatique toutes les 15 secondes jusqu'à libération du serveur.</div>
+      </button>
+
+      <button id="btn-rl-flash" onclick="switchFallbackModel('gemini:gemini-3.8-flash')" class="w-full text-left p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/30 transition">
+        <div class="font-bold text-cyan-300">2. Basculer sur Gemini 3.8 Flash (Réponse immédiate)</div>
+        <div class="text-[10px] text-slate-400 mt-0.5">Impact qualité : raisonnement architectural légèrement moins profond, mais très fiable et rapide sur le code standard.</div>
+      </button>
+
+      <button id="btn-rl-groq" onclick="switchFallbackModel('groq:llama-3.3-70b-versatile')" class="w-full text-left p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 transition">
+        <div class="font-bold text-slate-200">3. Basculer sur Groq — Llama 3.3 70B (Si clé configurée)</div>
+        <div class="text-[10px] text-slate-400 mt-0.5">Impact qualité : ultra-rapide, mais fenêtre de contexte plus courte et moins précis sur les refontes multi-fichiers complexes.</div>
+      </button>
+    </div>
+  </aside>
+
   <script>
     const script = document.createElement('script');
     script.src = `app.js?v=${Date.now()}`;
