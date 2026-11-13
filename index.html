@@ -12,7 +12,7 @@
 </head>
 <body>
 
-  <!-- Scène WebGL du Cerveau 3D -->
+  <!-- Scène WebGL du Cerveau 3D (se redimensionne automatiquement quand le HUD s'ouvre) -->
   <div id="3d-graph"></div>
 
   <!-- Barre supérieure HUD -->
@@ -26,7 +26,7 @@
         <span class="font-bold tracking-wider text-xs uppercase text-cyan-400">Neural Dev Hub V6.0</span>
       </div>
       <div class="h-4 w-[1px] bg-slate-700"></div>
-      <span id="stats-counter" class="text-xs text-slate-300">En attente de clés...</span>
+      <span id="stats-counter" class="text-xs text-slate-300">Initialisation...</span>
       <span id="scopes-badge" class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 hidden"></span>
       <button onclick="loadAllRepositories()" class="text-xs bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2.5 py-1 rounded border border-cyan-500/30 transition">
         Rafraîchir 3D
@@ -37,10 +37,14 @@
     </div>
 
     <div class="glass px-3.5 py-2 rounded-xl flex flex-wrap items-center gap-2.5 pointer-events-auto">
-      <label class="text-xs text-slate-400">Agent Code (XML) :</label>
+      <label class="text-xs text-slate-400">Agent Principal :</label>
       <select id="agent-selector" class="bg-slate-900 text-xs text-cyan-300 border border-cyan-500/30 rounded px-2.5 py-1 focus:outline-none">
-        <option value="gemini:gemini-2.5-pro">Gemini 2.5 Pro (Code Principal + Auto-Heal)</option>
-        <option value="gemini:gemini-2.5-flash">Gemini 2.5 Flash (Rapide / Haut Quota)</option>
+        <option value="gemini:gemini-3.8-flash">Gemini 3.8 Flash (Recommandé — Ingénierie & Agents)</option>
+        <option value="gemini:gemini-4-hydrogen">Gemini 4 Hydrogen (1M Contexte — Rapide & Quotidien)</option>
+        <option value="gemini:gemini-4-argon">Gemini 4 Argon (Raisonnement Avancé & Code Complexe)</option>
+        <option value="gemini:gemini-4-carbon">Gemini 4 Carbon (Raisonnement Maximal)</option>
+        <option value="gemini:gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+        <option value="gemini:gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (Ultra-Rapide / Haut Quota)</option>
         <option value="groq:openai/gpt-oss-120b">Groq — GPT-OSS 120B (Secours XML)</option>
         <option value="groq:llama-3.1-8b-instant">Groq — Llama 3.1 8B Instant</option>
         <option id="ollama-opt" value="ollama:deepseek-r1:32b" disabled>Ollama Local (Non détecté)</option>
@@ -51,54 +55,66 @@
       </button>
 
       <button onclick="toggleSettingsDrawer()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-600 transition">
-        Clés & Sécurité
+        <span id="storage-mode-indicator">🔑 Clés & Mode PC</span>
       </button>
     </div>
   </header>
 
-  <!-- Tiroir Configuration & Sécurité -->
-  <aside id="settings-drawer" class="fixed top-16 right-3 z-30 w-96 max-w-[94vw] glass rounded-2xl p-5 hidden">
-    <div class="flex items-center justify-between mb-2">
-      <h2 class="text-xs font-bold uppercase tracking-wider text-cyan-400">Clés API & Sécurité</h2>
-      <button onclick="toggleSettingsDrawer()" class="text-slate-400 hover:text-white text-sm">✕</button>
-    </div>
-    <p class="text-[11px] text-slate-400 mb-3">
-      Sur un PC tiers, garde le mode <b>Session (Onglet)</b> : les clés sont purgées dès la fermeture de l'onglet. Sur ton PC principal, choisis <b>Persistant</b>.
-    </p>
-    <div class="space-y-2.5 text-xs">
-      <div>
-        <label class="block text-slate-300 mb-1">Mode de stockage des clés</label>
-        <select id="cfg-storage-mode" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white">
-          <option value="session">Session (PC occasionnel — effacé à la fermeture)</option>
-          <option value="local">Persistant (Mon PC principal — localStorage)</option>
-        </select>
+  <!-- MODALE PREMIÈRE CONNEXION : CHOIX DU TYPE DE PC & CLÉS -->
+  <div id="first-run-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 hidden">
+    <div class="glass max-w-lg w-full rounded-2xl p-6 space-y-4 border border-cyan-500/40 shadow-2xl">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold uppercase tracking-wider text-cyan-400">Bienvenue sur Neural Dev Hub V6.0</h2>
+        <button onclick="closeFirstRunModal()" class="text-slate-400 hover:text-white text-sm">✕</button>
       </div>
-      <div>
-        <label class="block text-slate-300 mb-1">Utilisateur GitHub (auto-détecté via Token)</label>
-        <input id="cfg-owner" type="text" placeholder="Vicovert" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
+      <p class="text-xs text-slate-300 leading-relaxed">
+        Avant de commencer, sur quel ordinateur travailles-tu actuellement ? Cela détermine si tes clés API doivent être mémorisées ou détruites à la fermeture de l'onglet :
+      </p>
+
+      <!-- Choix visuel PC Principal vs PC Temporaire -->
+      <div class="grid grid-cols-2 gap-3 text-xs">
+        <button type="button" id="card-mode-local" onclick="selectStorageModeCard('local')" class="text-left p-3.5 rounded-xl border-2 border-cyan-400 bg-cyan-950/40 transition space-y-1">
+          <div class="font-bold text-cyan-300 text-sm">💻 Mon PC Principal</div>
+          <div class="text-[11px] text-slate-300">Sauvegarde mes clés sur cet appareil (<code>localStorage</code>) pour ne plus les ressaisir.</div>
+        </button>
+
+        <button type="button" id="card-mode-session" onclick="selectStorageModeCard('session')" class="text-left p-3.5 rounded-xl border-2 border-slate-700 bg-slate-900/70 hover:border-slate-500 transition space-y-1">
+          <div class="font-bold text-amber-300 text-sm">🕵️ PC Temporaire / Tiers</div>
+          <div class="text-[11px] text-slate-300">Oublie toutes mes clés dès que je ferme cet onglet (<code>sessionStorage</code>).</div>
+        </button>
       </div>
-      <div>
-        <label class="block text-slate-300 mb-1">GitHub Personal Access Token (<code>repo</code> + <code>workflow</code>)</label>
-        <input id="cfg-github-token" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
+
+      <div class="space-y-2.5 text-xs pt-1">
+        <div>
+          <label class="block text-slate-300 mb-1">Utilisateur GitHub (auto-détecté si tu mets un Token)</label>
+          <input id="cfg-owner" type="text" placeholder="ex: Vicovert" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-slate-300 mb-1">GitHub Personal Access Token (coches : <code>repo</code> + <code>workflow</code>)</label>
+          <input id="cfg-github-token" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-slate-300 mb-1">Clé Google Gemini (AI Studio)</label>
+          <input id="cfg-gemini-key" type="password" placeholder="AIzaSyXXXXXXXXXXXXXXXXXX" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-slate-300 mb-1">Clé Groq API (Optionnel — secours)</label>
+          <input id="cfg-groq-key" type="password" placeholder="gsk_xxxxxxxxxxxxxxxxxxxx" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
+        </div>
       </div>
-      <div>
-        <label class="block text-slate-300 mb-1">Clé Google Gemini (AI Studio)</label>
-        <input id="cfg-gemini-key" type="password" placeholder="AIzaSyXXXXXXXXXXXXXXXXXX" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
-      </div>
-      <div>
-        <label class="block text-slate-300 mb-1">Clé Groq API (Optionnel — secours)</label>
-        <input id="cfg-groq-key" type="password" placeholder="gsk_xxxxxxxxxxxxxxxxxxxx" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
-      </div>
+
+      <input type="hidden" id="cfg-storage-mode" value="local" />
+
       <div class="flex items-center gap-2 pt-2">
-        <button onclick="saveCredentials()" class="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 rounded-lg transition">
-          Enregistrer & Connecter
+        <button onclick="saveCredentials()" class="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 rounded-xl shadow transition text-xs">
+          Valider ce mode & Connecter le Cortex
         </button>
-        <button onclick="clearCredentials()" class="bg-rose-900/80 hover:bg-rose-700 text-rose-200 px-3 py-2 rounded-lg border border-rose-500/40 transition">
-          Purger
+        <button onclick="clearCredentials()" class="bg-rose-900/80 hover:bg-rose-700 text-rose-200 px-3 py-2.5 rounded-xl border border-rose-500/40 transition text-xs">
+          Purger tout
         </button>
       </div>
     </div>
-  </aside>
+  </div>
 
   <!-- Tiroir Création de Dépôt par Prompt -->
   <aside id="new-project-drawer" class="fixed top-16 left-3 z-30 w-[440px] max-w-[94vw] glass rounded-2xl p-5 hidden">
@@ -149,19 +165,16 @@
       </div>
     </div>
 
-    <!-- Onglets -->
+    <!-- 3 Onglets épurés (suppression de l'onglet Fichiers) -->
     <div class="flex border-b border-slate-800 bg-slate-950/50 text-xs">
       <button onclick="switchHudTab('overview')" id="tab-btn-overview" class="flex-1 py-2.5 font-semibold text-cyan-400 border-b-2 border-cyan-400">
         Vue & Santé
       </button>
       <button onclick="switchHudTab('ai')" id="tab-btn-ai" class="flex-1 py-2.5 font-semibold text-slate-400 hover:text-slate-200">
-        Audit & Roadmap
+        Audit Clair & Idées
       </button>
       <button onclick="switchHudTab('prompt')" id="tab-btn-prompt" class="flex-1 py-2.5 font-semibold text-slate-400 hover:text-slate-200">
-        Coder (XML + Auto-Heal)
-      </button>
-      <button onclick="switchHudTab('files')" id="tab-btn-files" class="flex-1 py-2.5 font-semibold text-slate-400 hover:text-slate-200">
-        Fichiers
+        Coder (Auto-Routing)
       </button>
     </div>
 
@@ -216,44 +229,47 @@
         </div>
       </div>
 
-      <!-- ONGLET 2 : AUDIT & ROADMAP IA -->
+      <!-- ONGLET 2 : AUDIT CLAIR & ROADMAP -->
       <div id="tab-ai" class="space-y-3 hidden">
         <div class="flex items-center justify-between">
-          <span class="text-slate-300 font-semibold">Audit Architectural & Améliorations (XML)</span>
+          <span class="text-slate-300 font-semibold">Diagnostic Simple & Améliorations Concrètes</span>
           <button id="btn-analyze-repo" onclick="analyzeCurrentRepo()" class="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1.5 rounded-lg font-semibold transition">
-            Analyser avec l'Agent
+            Lancer l'Audit Clair
           </button>
         </div>
         <div id="hud-ai-analysis" class="bg-slate-950/70 p-3.5 rounded-xl border border-slate-800 space-y-3 text-slate-200 leading-relaxed">
-          Clique sur « Analyser avec l'Agent » pour inspecter le dépôt et obtenir des améliorations applicables en un clic.
+          Clique sur « Lancer l'Audit Clair » : un premier modèle rapide choisit les fichiers clés, puis l'Agent t'explique simplement ce que fait le projet et te propose 3 à 4 améliorations concrètes sans jargon inutile.
         </div>
       </div>
 
-      <!-- ONGLET 3 : CODER PAR PROMPT (XML + ROUTING FLASH + AUTO-HEAL) -->
+      <!-- ONGLET 3 : CODER PAR PROMPT (ZÉRO SÉLECTION MANUELLE) -->
       <div id="tab-prompt" class="space-y-3 hidden">
-        <div>
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-slate-300 font-semibold">Fichiers de contexte (vide = sélection auto par Flash) :</span>
-            <div class="flex items-center gap-2">
-              <button onclick="toggleAllContextFiles(false)" class="text-[10px] text-amber-400 hover:underline">Tout décocher (Mode Auto Flash)</button>
-              <button onclick="toggleAllContextFiles(true)" class="text-[10px] text-cyan-400 hover:underline">Pré-sélection (8)</button>
-            </div>
+        <div class="bg-slate-900/75 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between">
+          <div>
+            <div class="text-[11px] font-semibold text-cyan-300">Tri Automatique des Fichiers (Gemini 3.5 Flash-Lite)</div>
+            <div class="text-[10px] text-slate-400">Tu n'as rien à cocher : le modèle de base lit l'arborescence et sélectionne tout seul les fichiers utiles à ta demande.</div>
           </div>
-          <div id="hud-context-files" class="bg-slate-950/70 p-2 rounded-lg border border-slate-800 max-h-28 overflow-y-auto space-y-1 font-mono text-[11px]"></div>
+          <span id="hud-repo-file-count" class="text-[10px] font-mono bg-slate-950 px-2 py-1 rounded border border-slate-800 text-slate-300 shrink-0">0 fichier</span>
+        </div>
+
+        <!-- Badges des fichiers auto-sélectionnés lors du dernier prompt -->
+        <div id="hud-auto-selected-box" class="hidden bg-slate-950/80 p-2.5 rounded-xl border border-cyan-500/30 space-y-1.5">
+          <div class="text-[10px] uppercase font-bold text-cyan-400">Fichiers sélectionnés automatiquement pour cette demande :</div>
+          <div id="hud-auto-selected-badges" class="flex flex-wrap gap-1.5 font-mono text-[10px]"></div>
         </div>
 
         <div>
-          <label class="block text-slate-300 font-semibold mb-1">Prompt de modification / création :</label>
-          <textarea id="hud-prompt-input" rows="4" placeholder="Décris la modification souhaitée. Si aucun fichier n'est coché, Gemini 2.5 Flash sélectionnera automatiquement les fichiers pertinents avant d'appeler Gemini 2.5 Pro en XML/CDATA." class="w-full bg-slate-950/90 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-cyan-400 focus:outline-none"></textarea>
+          <label class="block text-slate-300 font-semibold mb-1">Que veux-tu modifier, corriger ou ajouter ?</label>
+          <textarea id="hud-prompt-input" rows="4" placeholder="Décris simplement ton besoin. Au clic ci-dessous, Gemini 3.5 Flash-Lite repère les fichiers concernés, puis l'Agent Principal génère le code en XML/CDATA." class="w-full bg-slate-950/90 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-cyan-400 focus:outline-none"></textarea>
         </div>
 
         <label class="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer">
           <input id="chk-auto-heal" type="checkbox" checked class="accent-cyan-500" />
-          <span>Activer la boucle <b>Auto-Heal CI/CD</b> après le push (corrige automatiquement si GitHub Actions échoue)</span>
+          <span>Activer la boucle <b>Auto-Heal CI/CD</b> après le push (corrige tout seul si GitHub Actions plante)</span>
         </label>
 
-        <button id="btn-generate-changes" onclick="proposeCodeChanges()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 rounded-lg transition">
-          1. Générer les modifications (Protocole XML / CDATA)
+        <button id="btn-generate-changes" onclick="proposeCodeChanges()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2.5 rounded-lg shadow transition">
+          1. Sélectionner les fichiers auto & Générer le code (XML / CDATA)
         </button>
 
         <div id="hud-prompt-status" class="text-xs text-amber-300 whitespace-pre-wrap font-mono"></div>
@@ -273,16 +289,6 @@
           <button id="btn-commit-push" onclick="commitStagedChanges()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 rounded-lg shadow transition">
             2. Backup Auto + Push Atomique + Surveillance CI/CD
           </button>
-        </div>
-      </div>
-
-      <!-- ONGLET 4 : EXPLORATEUR DE FICHIERS -->
-      <div id="tab-files" class="space-y-2 hidden">
-        <div class="text-slate-400 text-[11px]">Clique sur un fichier pour lire son code (UTF-8 intégral) :</div>
-        <div id="hud-file-tree" class="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 max-h-56 overflow-y-auto space-y-1 font-mono text-[11px]"></div>
-        <div id="hud-file-viewer-box" class="hidden space-y-1 pt-2">
-          <div id="hud-file-viewer-title" class="text-cyan-400 font-mono text-[11px] font-bold"></div>
-          <pre id="hud-file-viewer-content" class="bg-slate-950 p-3 rounded-xl border border-slate-800 overflow-x-auto max-h-72 text-[11px] text-slate-200"></pre>
         </div>
       </div>
 
@@ -307,9 +313,9 @@
         <div id="rl-wait-sub" class="text-[10px] text-slate-300 mt-0.5">Relance automatique toutes les 15 secondes.</div>
       </button>
 
-      <button id="btn-rl-flash" onclick="switchFallbackModel('gemini:gemini-2.5-flash')" class="w-full text-left p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/30 transition">
-        <div class="font-bold text-cyan-300">2. Basculer sur Gemini 2.5 Flash (Haut Quota)</div>
-        <div class="text-[10px] text-slate-400 mt-0.5">Génération XML/CDATA rapide avec quota élargi.</div>
+      <button id="btn-rl-flash" onclick="switchFallbackModel('gemini:gemini-3.5-flash-lite')" class="w-full text-left p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/30 transition">
+        <div class="font-bold text-cyan-300">2. Basculer sur Gemini 3.5 Flash-Lite (Haut Quota)</div>
+        <div class="text-[10px] text-slate-400 mt-0.5">Modèle rapide à haut débit sans blocage de quota.</div>
       </button>
 
       <button id="btn-rl-groq" onclick="switchFallbackModel('groq:openai/gpt-oss-120b')" class="w-full text-left p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 transition">
