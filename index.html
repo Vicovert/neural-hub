@@ -50,7 +50,7 @@
           <span id="status-ping" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
           <span id="status-dot" class="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
         </span>
-        <span class="font-bold tracking-wider text-xs uppercase text-cyan-400">Neural Dev Hub V5.4</span>
+        <span class="font-bold tracking-wider text-xs uppercase text-cyan-400">Neural Dev Hub V5.6</span>
       </div>
       <div class="h-4 w-[1px] bg-slate-700"></div>
       <span id="stats-counter" class="text-xs text-slate-300">En attente de clés...</span>
@@ -129,7 +129,211 @@
     </div>
   </aside>
 
-  <!-- Script principal modulaire -->
-  <script type="module" src="app.js"></script>
+  <!-- Tiroir Création de Dépôt par Prompt -->
+  <aside id="new-project-drawer" class="fixed top-16 left-3 z-30 w-[440px] max-w-[94vw] glass rounded-2xl p-5 hidden">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-xs font-bold uppercase tracking-wider text-cyan-400">Créer un Dépôt Git de A à Z par Prompt</h2>
+      <button onclick="toggleNewProjectDrawer()" class="text-slate-400 hover:text-white text-sm">✕</button>
+    </div>
+    <div class="space-y-3 text-xs">
+      <div class="grid grid-cols-3 gap-2">
+        <div class="col-span-2">
+          <label class="block text-slate-300 mb-1">Nom du dépôt GitHub</label>
+          <input id="new-repo-name" type="text" placeholder="ex: mon-nouveau-projet" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-slate-300 mb-1">Visibilité</label>
+          <select id="new-repo-private" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white">
+            <option value="false">Public</option>
+            <option value="true">Privé</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="block text-slate-300 mb-1">Prompt complet du projet à générer</label>
+        <textarea id="new-repo-prompt" rows="4" placeholder="Décris le projet. L'agent crée le repo sur GitHub, attend l'initialisation de la branche, génère tous les fichiers complets et pousse le commit atomique." class="w-full bg-slate-900 border border-slate-700 rounded p-2.5 text-white focus:border-cyan-400 focus:outline-none"></textarea>
+      </div>
+      <button id="btn-create-repo" onclick="createRepoFromPrompt()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 rounded-lg shadow transition">
+        Créer le dépôt & Générer le code
+      </button>
+      <div id="new-repo-log" class="text-[11px] text-slate-300 bg-slate-950/80 p-2.5 rounded border border-slate-800 hidden max-h-44 overflow-y-auto whitespace-pre-wrap"></div>
+    </div>
+  </aside>
+
+  <!-- Panneau HUD Latéral du Projet Sélectionné (ancré à droite, non-popup) -->
+  <aside id="project-hud" class="fixed top-16 bottom-3 right-3 z-20 w-[520px] max-w-[95vw] glass rounded-2xl flex flex-col hidden overflow-hidden">
+    <!-- En-tête -->
+    <div class="p-3.5 border-b border-slate-800 flex items-start justify-between gap-2 bg-slate-900/60">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <span id="hud-workflow-badge" class="px-2 py-0.5 text-[10px] font-bold uppercase rounded bg-slate-700 text-slate-200">SCAN...</span>
+          <h2 id="hud-title" class="text-sm font-bold text-white truncate">Nom du projet</h2>
+        </div>
+        <p id="hud-desc" class="text-[11px] text-slate-400 mt-1 truncate">Description</p>
+      </div>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button onclick="refreshCurrentProject()" title="Rafraîchir ce projet" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 rounded border border-slate-700">↻</button>
+        <a id="hud-github-link" href="#" target="_blank" class="text-xs bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2.5 py-1 rounded border border-cyan-500/30">GitHub ↗</a>
+        <button onclick="closeProjectHud()" class="text-slate-400 hover:text-white px-2 py-1 text-sm">✕</button>
+      </div>
+    </div>
+
+    <!-- Onglets -->
+    <div class="flex border-b border-slate-800 bg-slate-950/50 text-xs">
+      <button onclick="switchHudTab('overview')" id="tab-btn-overview" class="flex-1 py-2.5 font-semibold text-cyan-400 border-b-2 border-cyan-400">
+        Vue & Santé
+      </button>
+      <button onclick="switchHudTab('ai')" id="tab-btn-ai" class="flex-1 py-2.5 font-semibold text-slate-400 hover:text-slate-200">
+        Audit & Roadmap
+      </button>
+      <button onclick="switchHudTab('prompt')" id="tab-btn-prompt" class="flex-1 py-2.5 font-semibold text-slate-400 hover:text-slate-200">
+        Coder par Prompt
+      </button>
+      <button onclick="switchHudTab('files')" id="tab-btn-files" class="flex-1 py-2.5 font-semibold text-slate-400 hover:text-slate-200">
+        Fichiers
+      </button>
+    </div>
+
+    <!-- Contenu des onglets -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs">
+
+      <!-- ONGLET 1 : VUE & SANTÉ -->
+      <div id="tab-overview" class="space-y-3.5">
+        <div class="grid grid-cols-2 gap-2.5">
+          <div class="bg-slate-900/75 p-3 rounded-xl border border-slate-800">
+            <div class="text-slate-400 text-[11px]">Site Web / Déploiement</div>
+            <div id="hud-site-status" class="text-xs font-bold text-slate-200 mt-1">Vérification...</div>
+            <a id="hud-site-url" href="#" target="_blank" class="text-[11px] text-cyan-400 underline hidden mt-1 inline-block">Ouvrir le site live ↗</a>
+          </div>
+          <div class="bg-slate-900/75 p-3 rounded-xl border border-slate-800">
+            <div class="text-slate-400 text-[11px]">Achats & Revenus (metrics.json)</div>
+            <div id="hud-sales-status" class="text-xs font-bold text-slate-200 mt-1">Scan...</div>
+            <div id="hud-sales-sub" class="text-[10px] text-slate-400 mt-0.5"></div>
+          </div>
+        </div>
+
+        <!-- Workflows GitHub Actions -->
+        <div class="bg-slate-900/75 p-3 rounded-xl border border-slate-800 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400 text-[11px] uppercase font-semibold">GitHub Actions & Diagnostic CI/CD</span>
+            <button onclick="triggerWorkflowDispatch()" class="text-[11px] bg-cyan-950 hover:bg-cyan-900 text-cyan-300 px-2 py-0.5 rounded border border-cyan-500/30">
+              ⚡ Déclencher Workflow
+            </button>
+          </div>
+          <div id="hud-actions-list" class="space-y-2 text-slate-300">Chargement...</div>
+        </div>
+
+        <!-- Dernier Commit & Rollback -->
+        <div class="bg-slate-900/75 p-3 rounded-xl border border-slate-800 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400 text-[11px] uppercase font-semibold">Dernier Commit & Sécurité</span>
+            <button onclick="rollbackLastCommit()" class="text-[11px] bg-amber-950/80 hover:bg-amber-900 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
+              ⏪ Rollback au commit parent
+            </button>
+          </div>
+          <div id="hud-last-commit" class="text-slate-300">Chargement...</div>
+        </div>
+      </div>
+
+      <!-- ONGLET 2 : AUDIT & ROADMAP IA -->
+      <div id="tab-ai" class="space-y-3 hidden">
+        <div class="flex items-center justify-between">
+          <span class="text-slate-300 font-semibold">Que fait ce code & Améliorations possibles</span>
+          <button id="btn-analyze-repo" onclick="analyzeCurrentRepo()" class="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1.5 rounded-lg font-semibold transition">
+            Analyser avec l'Agent
+          </button>
+        </div>
+        <div id="hud-ai-analysis" class="bg-slate-950/70 p-3.5 rounded-xl border border-slate-800 space-y-3 text-slate-200 leading-relaxed">
+          Clique sur « Analyser avec l'Agent » pour inspecter le code réel du projet, obtenir son résumé architectural et générer des boutons d'améliorations applicables en un clic.
+        </div>
+      </div>
+
+      <!-- ONGLET 3 : CODER PAR PROMPT -->
+      <div id="tab-prompt" class="space-y-3 hidden">
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-slate-300 font-semibold">Fichiers inclus dans le contexte de l'agent :</span>
+            <button onclick="toggleAllContextFiles(true)" class="text-[10px] text-cyan-400 hover:underline">Réinitialiser sélection</button>
+          </div>
+          <div id="hud-context-files" class="bg-slate-950/70 p-2 rounded-lg border border-slate-800 max-h-28 overflow-y-auto space-y-1 font-mono text-[11px]"></div>
+        </div>
+
+        <div>
+          <label class="block text-slate-300 font-semibold mb-1">Prompt de modification / ajout / suppression :</label>
+          <textarea id="hud-prompt-input" rows="4" placeholder="Décris la modification souhaitée. L'agent appliquera des patchs chirurgicaux sans tronquer les fichiers existants." class="w-full bg-slate-950/90 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-cyan-400 focus:outline-none"></textarea>
+        </div>
+
+        <button id="btn-generate-changes" onclick="proposeCodeChanges()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 rounded-lg transition">
+          1. Générer les modifications (Diff avant Commit)
+        </button>
+
+        <div id="hud-prompt-status" class="text-xs text-amber-300 whitespace-pre-wrap"></div>
+
+        <!-- Prévisualisation des fichiers générés avant commit -->
+        <div id="hud-staged-box" class="hidden space-y-3 bg-slate-950/85 p-3 rounded-xl border border-cyan-500/40">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-cyan-300">Aperçu avant Commit Atomique :</span>
+            <span id="hud-staged-count" class="text-[10px] bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded">0 fichier</span>
+          </div>
+          <p id="hud-staged-summary" class="text-slate-300 italic text-[11px]"></p>
+          <div id="hud-staged-files" class="space-y-2 max-h-60 overflow-y-auto"></div>
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1">Message du commit :</label>
+            <input id="hud-commit-msg" type="text" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white" />
+          </div>
+          <button id="btn-commit-push" onclick="commitStagedChanges()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 rounded-lg shadow transition">
+            2. Valider & Pousser le Commit sur GitHub
+          </button>
+        </div>
+      </div>
+
+      <!-- ONGLET 4 : EXPLORATEUR DE FICHIERS -->
+      <div id="tab-files" class="space-y-2 hidden">
+        <div class="text-slate-400 text-[11px]">Clique sur un fichier pour lire son code (UTF-8 intégral) :</div>
+        <div id="hud-file-tree" class="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 max-h-56 overflow-y-auto space-y-1 font-mono text-[11px]"></div>
+        <div id="hud-file-viewer-box" class="hidden space-y-1 pt-2">
+          <div id="hud-file-viewer-title" class="text-cyan-400 font-mono text-[11px] font-bold"></div>
+          <pre id="hud-file-viewer-content" class="bg-slate-950 p-3 rounded-xl border border-slate-800 overflow-x-auto max-h-72 text-[11px] text-slate-200"></pre>
+        </div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- Panneau de décision en cas de saturation API (503 / 429) -->
+  <aside id="rate-limit-panel" class="fixed bottom-4 left-4 z-40 w-[460px] max-w-[94vw] glass rounded-2xl p-4 hidden border border-amber-500/50">
+    <div class="flex items-start justify-between gap-2 mb-2">
+      <div class="flex items-center gap-2">
+        <span class="h-2.5 w-2.5 rounded-full bg-amber-400 animate-ping"></span>
+        <h3 id="rl-title" class="text-xs font-bold uppercase tracking-wider text-amber-300">Serveur IA saturé (HTTP 429)</h3>
+      </div>
+      <button onclick="cancelRetryLoop()" class="text-slate-400 hover:text-white text-xs">Annuler ✕</button>
+    </div>
+
+    <p id="rl-desc" class="text-[11px] text-slate-300 leading-relaxed mb-3"></p>
+
+    <div class="space-y-2 text-xs">
+      <button id="btn-rl-wait" onclick="startActiveWaitLoop()" class="w-full text-left p-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 transition">
+        <div class="font-bold text-amber-200">1. Patienter et conserver la qualité maximale</div>
+        <div id="rl-wait-sub" class="text-[10px] text-slate-300 mt-0.5">Relance automatique toutes les 15 secondes jusqu'à libération du serveur.</div>
+      </button>
+
+      <button id="btn-rl-flash" onclick="switchFallbackModel('gemini:gemini-3.5-flash-lite')" class="w-full text-left p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-cyan-500/30 transition">
+        <div class="font-bold text-cyan-300">2. Basculer sur Gemini 3.5 Flash-Lite (Quota gratuit garanti)</div>
+        <div class="text-[10px] text-slate-400 mt-0.5">Impact qualité : modèle léger haute vitesse, idéal pour l'audit et les modifications ciblées sans quota bloqué.</div>
+      </button>
+
+      <button id="btn-rl-groq" onclick="switchFallbackModel('groq:llama-3.1-8b-instant')" class="w-full text-left p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 transition">
+        <div class="font-bold text-slate-200">3. Basculer sur Groq — Llama 3.1 8B Instant (Si clé configurée)</div>
+        <div class="text-[10px] text-slate-400 mt-0.5">Impact qualité : ultra-rapide, mais fenêtre de contexte plus courte et moins précis sur les refontes multi-fichiers complexes.</div>
+      </button>
+    </div>
+  </aside>
+
+  <script>
+    const script = document.createElement('script');
+    script.src = `app.js?v=${Date.now()}`;
+    document.body.appendChild(script);
+  </script>
 </body>
 </html>
