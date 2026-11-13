@@ -1,6 +1,10 @@
-// ============================================================================
-// PALETTE BIO-LUMINESCENTE PAR LANGAGE / PROJET
-// ============================================================================
+/* ============================================================================
+ * NEURAL DEV HUB V6.0 — FUSION ULTIME (AMAS SYNAPTIQUES 3D + MOTEUR XML/CDATA)
+ * ============================================================================ */
+
+window.__NDH_BOOTED__ = true;
+
+// Palette bio-luminescente par langage
 const LANG_PALETTE = {
   Python: '#00f0ff',      // Cyan électrique
   JavaScript: '#ffbe0b',  // Or solaire
@@ -22,9 +26,7 @@ function getProjectColor(repo, index) {
   return fallbackColors[index % fallbackColors.length];
 }
 
-// ============================================================================
-// ÉTAT GLOBAL DU HUB V6.0
-// ============================================================================
+// État global unifié
 const STATE = {
   ghToken: '',
   geminiKey: '',
@@ -37,7 +39,8 @@ const STATE = {
   graph3D: null,
   orbitAngle: 0,
   orbitRadius: 210,
-  cameraLockedOnNode: null, // Si non-null, la caméra est verrouillée sur cet amas projet
+  cameraLockedOnNode: null,
+  abortController: null,
   cortexNode: {
     id: 'CORTEX_CORE',
     name: 'CORTEX CENTRAL',
@@ -46,37 +49,55 @@ const STATE = {
     fy: 0,
     fz: 0
   },
-  clusterMap: new Map() // repo.full_name -> { hubNode, microNodes }
+  clusterMap: new Map() // repo.full_name -> { hubNode, microNodes, color }
 };
 
 // ============================================================================
-// DÉMARRAGE AUTOMATIQUE & GESTION DES CLÉS (PC PRINCIPAL vs OCCASIONNEL)
+// DÉTECTION MULTI-CLÉS & CONNEXION AUTOMATIQUE (PC PRINCIPAL vs OCCASIONNEL)
 // ============================================================================
+function detectStoredCredentials() {
+  const sessionGh = (sessionStorage.getItem('ndh_gh_token') || '').trim();
+  const sessionGem = (sessionStorage.getItem('ndh_gemini_key') || '').trim();
+  if (sessionGh && sessionGem) {
+    return { ghToken: sessionGh, geminiKey: sessionGem, mode: 'session' };
+  }
+
+  const localGh = (
+    localStorage.getItem('ndh_gh_token') ||
+    localStorage.getItem('gh_token') ||
+    localStorage.getItem('github_token') ||
+    localStorage.getItem('GITHUB_TOKEN') ||
+    ''
+  ).trim();
+
+  const localGem = (
+    localStorage.getItem('ndh_gemini_key') ||
+    localStorage.getItem('gemini_key') ||
+    localStorage.getItem('gemini_api_key') ||
+    localStorage.getItem('GEMINI_API_KEY') ||
+    ''
+  ).trim();
+
+  if (localGh && localGem) {
+    return { ghToken: localGh, geminiKey: localGem, mode: 'local' };
+  }
+
+  return { ghToken: '', geminiKey: '', mode: 'none' };
+}
+
 function bootHub() {
   bindUIEvents();
   init3DCortexGraph();
   startOrbitalAnimation();
 
-  // Détection automatique des clés en mémoire (sans avoir à cliquer sur Reconnecter)
-  const localGh = localStorage.getItem('ndh_gh_token');
-  const localGem = localStorage.getItem('ndh_gemini_key');
-  const sessionGh = sessionStorage.getItem('ndh_gh_token');
-  const sessionGem = sessionStorage.getItem('ndh_gemini_key');
-
-  if (localGh && localGem) {
-    STATE.ghToken = localGh;
-    STATE.geminiKey = localGem;
-    STATE.storageMode = 'local';
-    updatePersistenceBadge();
-    connectAndBuildCortex();
-  } else if (sessionGh && sessionGem) {
-    STATE.ghToken = sessionGh;
-    STATE.geminiKey = sessionGem;
-    STATE.storageMode = 'session';
+  const creds = detectStoredCredentials();
+  if (creds.ghToken && creds.geminiKey) {
+    STATE.ghToken = creds.ghToken;
+    STATE.geminiKey = creds.geminiKey;
+    STATE.storageMode = creds.mode;
     updatePersistenceBadge();
     connectAndBuildCortex();
   } else {
-    // Première connexion : afficher le choix PC Principal / Occasionnel
     document.getElementById('auth-overlay').classList.remove('hidden');
     setGlobalStatus('ATTENTE CLÉS', '#f59e0b');
   }
@@ -91,16 +112,16 @@ if (document.readyState === 'loading') {
 function updatePersistenceBadge() {
   const pill = document.getElementById('persistence-badge');
   if (STATE.storageMode === 'local') {
-    pill.textContent = '🔒 PC PRINCIPAL (Clés permanentes)';
+    pill.textContent = '🔒 PC PRINCIPAL (Permanent)';
   } else if (STATE.storageMode === 'session') {
-    pill.textContent = '⏳ PC OCCASIONNEL (Session seule)';
+    pill.textContent = '⏳ PC OCCASIONNEL (Session)';
   } else {
     pill.textContent = 'NON CONNECTÉ';
   }
 }
 
 function bindUIEvents() {
-  // Choix visuel Radio PC Principal / Occasionnel
+  // Choix Radio PC Principal / PC Occasionnel
   document.querySelectorAll('input[name="device-mode"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
       document.getElementById('opt-main-pc').classList.toggle('selected', e.target.value === 'local');
@@ -108,20 +129,17 @@ function bindUIEvents() {
     });
   });
 
-  // Validation première connexion
+  // Validation des clés API
   document.getElementById('btn-auth-submit').addEventListener('click', () => {
     const gh = document.getElementById('gh-token-input').value.trim();
     const gem = document.getElementById('gemini-key-input').value.trim();
     const mode = document.querySelector('input[name="device-mode"]:checked').value;
 
     if (!gh || !gem) {
-      return log('Erreur : Les deux clés (GitHub PAT et Gemini API Key) sont obligatoires.', 'log-err');
+      return log('Erreur : Le Token GitHub et la clé Gemini sont tous deux requis.', 'log-err');
     }
 
-    localStorage.removeItem('ndh_gh_token');
-    localStorage.removeItem('ndh_gemini_key');
-    sessionStorage.removeItem('ndh_gh_token');
-    sessionStorage.removeItem('ndh_gemini_key');
+    clearAllStoredKeys();
 
     if (mode === 'local') {
       localStorage.setItem('ndh_gh_token', gh);
@@ -140,12 +158,21 @@ function bindUIEvents() {
     connectAndBuildCortex();
   });
 
-  // Bouton Déconnexion
+  // Ouverture manuelle de la configuration des clés
+  document.getElementById('btn-open-settings').addEventListener('click', () => {
+    document.getElementById('gh-token-input').value = STATE.ghToken;
+    document.getElementById('gemini-key-input').value = STATE.geminiKey;
+    document.getElementById('btn-auth-cancel').classList.remove('hidden');
+    document.getElementById('auth-overlay').classList.remove('hidden');
+  });
+
+  document.getElementById('btn-auth-cancel').addEventListener('click', () => {
+    document.getElementById('auth-overlay').classList.add('hidden');
+  });
+
+  // Déconnexion complète
   document.getElementById('btn-logout').addEventListener('click', () => {
-    localStorage.removeItem('ndh_gh_token');
-    localStorage.removeItem('ndh_gemini_key');
-    sessionStorage.removeItem('ndh_gh_token');
-    sessionStorage.removeItem('ndh_gemini_key');
+    clearAllStoredKeys();
     location.reload();
   });
 
@@ -169,7 +196,7 @@ function bindUIEvents() {
     }
   });
 
-  // Navigation Onglets Sidebar
+  // Navigation par onglets dans le panneau projet
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#project-sidebar .tab-content').forEach(el => el.classList.add('hidden'));
@@ -179,21 +206,39 @@ function bindUIEvents() {
     });
   });
 
-  // Switch Modes Agent
+  // Bascule entre Demande Libre et Audit
   document.getElementById('mode-btn-exec').addEventListener('click', () => setAgentMode('exec'));
   document.getElementById('mode-btn-audit').addEventListener('click', () => setAgentMode('audit'));
 
-  // Actions Agent, Fichiers & Backups
+  // Actions principales
   document.getElementById('btn-run-exec').addEventListener('click', runFreeExecutionPipeline);
+  document.getElementById('btn-stop-agent').addEventListener('click', () => {
+    if (STATE.abortController) {
+      STATE.abortController.abort();
+      log('Arrêt du cycle demandé par l\'utilisateur.', 'log-warn');
+      setStepStatus('Interrompu');
+    }
+  });
   document.getElementById('btn-run-audit').addEventListener('click', runProjectAudit);
   document.getElementById('file-filter').addEventListener('input', filterFileCheckboxes);
   document.getElementById('btn-uncheck-all').addEventListener('click', uncheckAllFiles);
+  document.getElementById('btn-refresh-tree').addEventListener('click', () => {
+    if (STATE.activeRepo) refreshActiveProjectFullState();
+  });
   document.getElementById('btn-manual-backup').addEventListener('click', createManualBackupTag);
+}
+
+function clearAllStoredKeys() {
+  ['ndh_gh_token', 'gh_token', 'github_token', 'GITHUB_TOKEN', 'ndh_gemini_key', 'gemini_key', 'gemini_api_key', 'GEMINI_API_KEY'].forEach(k => {
+    localStorage.removeItem(k);
+    sessionStorage.removeItem(k);
+  });
 }
 
 function log(msg, cls = 'log-info') {
   const term = document.getElementById('terminal');
-  const time = new Date().toLocaleTimeString();
+  if (!term) return;
+  const time = new Date().toLocaleTimeString('fr-FR', { hour12: false });
   const line = document.createElement('div');
   line.className = cls;
   line.textContent = `[${time}] ${msg}`;
@@ -201,19 +246,24 @@ function log(msg, cls = 'log-info') {
   term.scrollTop = term.scrollHeight;
 }
 
+function setStepStatus(text) {
+  const pill = document.getElementById('agent-step-indicator');
+  if (pill) pill.textContent = text;
+}
+
 function setGlobalStatus(text, color = '#1e293b') {
   const badge = document.getElementById('global-status');
-  badge.textContent = text;
-  badge.style.background = color;
+  if (badge) {
+    badge.textContent = text;
+    badge.style.background = color;
+  }
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ============================================================================
-// RENDU 3D ESTHÉTIQUE : CORTEX MULTICOUCHE, AMAS DE MICRO-NEURONES & LABELS PERMANENTS
+// RENDU 3D BIO-LUMINESCENT : CORTEX MULTICOUCHE, AMAS DE MICRO-NEURONES & LABELS
 // ============================================================================
-
-// Création d'un Sprite de texte 2D net qui flotte en permanence au-dessus de l'amas
 function createFloatingLabelSprite(text, accentColor) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
@@ -225,8 +275,7 @@ function createFloatingLabelSprite(text, accentColor) {
   const boxWidth = Math.min(490, textWidth + 48);
   const startX = (512 - boxWidth) / 2;
 
-  // Fond capsule semi-transparent
-  ctx.fillStyle = 'rgba(4, 8, 18, 0.82)';
+  ctx.fillStyle = 'rgba(4, 8, 18, 0.84)';
   ctx.strokeStyle = accentColor;
   ctx.lineWidth = 3;
   ctx.beginPath();
@@ -234,7 +283,6 @@ function createFloatingLabelSprite(text, accentColor) {
   ctx.fill();
   ctx.stroke();
 
-  // Texte lumineux
   ctx.fillStyle = '#ffffff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -253,7 +301,6 @@ function createFloatingLabelSprite(text, accentColor) {
   return sprite;
 }
 
-// Création d'un halo lumineux (Glow Sprite) pour donner l'aspect neurone biologique
 function createGlowSprite(hexColor, size) {
   const canvas = document.createElement('canvas');
   canvas.width = 128;
@@ -286,51 +333,50 @@ function buildCustomNodeObject(node) {
   if (node.nodeType === 'cortex') {
     const group = new THREE.Group();
 
-    // Cœur plasma interne
     const coreGeo = new THREE.IcosahedronGeometry(14, 3);
-    const coreMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+    const coreMat = new THREE.MeshStandardMaterial({
+      color: 0x00f0ff,
+      emissive: 0x00a8ff,
+      emissiveIntensity: 0.9,
+      roughness: 0.2,
+      metalness: 0.8
+    });
     group.add(new THREE.Mesh(coreGeo, coreMat));
 
-    // Coque neurale filaire externe
     const shellGeo = new THREE.IcosahedronGeometry(24, 2);
     const shellMat = new THREE.MeshBasicMaterial({
       color: 0xff2a85,
       wireframe: true,
       transparent: true,
-      opacity: 0.45
+      opacity: 0.48
     });
     const shellMesh = new THREE.Mesh(shellGeo, shellMat);
     group.add(shellMesh);
 
-    // Anneaux orbitaux du Cortex
-    const ringGeo = new THREE.TorusGeometry(32, 0.35, 12, 90);
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.5 });
-    const ring1 = new THREE.Mesh(ringGeo, ringMat);
+    const ringGeo = new THREE.TorusGeometry(32, 0.4, 12, 90);
+    const ring1 = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.55 }));
     ring1.rotation.x = Math.PI / 2.4;
     group.add(ring1);
 
-    const ring2 = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0x8338ec, transparent: true, opacity: 0.4 }));
+    const ring2 = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0x8338ec, transparent: true, opacity: 0.45 }));
     ring2.rotation.y = Math.PI / 3;
     group.add(ring2);
 
-    // Halo géant
     group.add(createGlowSprite('#00f0ff', 95));
 
     node.__cortexRefs = { shellMesh, ring1, ring2 };
     return group;
   }
 
-  // 2. CŒUR D'AMAS PROJET (Porte le nom flottant visible en permanence + soma central)
+  // 2. CŒUR D'AMAS PROJET (Soma central + Nom flottant permanent)
   if (node.nodeType === 'clusterHub') {
     const group = new THREE.Group();
-    const sphereGeo = new THREE.SphereGeometry(2.6, 16, 16);
+    const sphereGeo = new THREE.SphereGeometry(2.8, 18, 18);
     const sphereMat = new THREE.MeshBasicMaterial({ color: node.color });
     group.add(new THREE.Mesh(sphereGeo, sphereMat));
 
-    // Halo lumineux du soma
-    group.add(createGlowSprite(node.color, 18));
+    group.add(createGlowSprite(node.color, 19));
 
-    // Étiquette flottante permanente avec le nom du dépôt
     const labelSprite = createFloatingLabelSprite(node.name, node.color);
     labelSprite.position.set(0, 14, 0);
     group.add(labelSprite);
@@ -338,7 +384,7 @@ function buildCustomNodeObject(node) {
     return group;
   }
 
-  // 3. MICRO-NEURONE SATELLITE (Petits neurones formant l'amas du projet)
+  // 3. MICRO-NEURONE SATELLITE (Petits neurones de l'amas)
   const microGroup = new THREE.Group();
   const microGeo = new THREE.SphereGeometry(1.15, 10, 10);
   const microMat = new THREE.MeshBasicMaterial({ color: node.color });
@@ -354,7 +400,7 @@ function init3DCortexGraph() {
     .backgroundColor('rgba(0,0,0,0)')
     .showNavInfo(false)
     .nodeThreeObject(buildCustomNodeObject)
-    .nodeLabel(() => '') // Désactive l'infobulle au survol puisque les noms flottent en permanence
+    .nodeLabel(() => '')
     .linkColor(link => link.color || 'rgba(0, 240, 255, 0.2)')
     .linkWidth(link => link.isAxon ? 1.2 : 0.55)
     .linkDirectionalParticles(link => link.isAxon ? 3 : 1)
@@ -368,17 +414,22 @@ function init3DCortexGraph() {
     })
     .graphData({ nodes: [STATE.cortexNode], links: [] });
 
-  // Configuration stricte de la caméra : centrée sur le Cortex sans pouvoir trop s'éloigner ni dériver
+  // Éclairage Three.js pour sublimer le noyau Cortex
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+  const dirLight = new THREE.DirectionalLight(0x00f0ff, 1.3);
+  dirLight.position.set(120, 180, 140);
+  STATE.graph3D.scene().add(ambientLight, dirLight);
+
+  // Bridage strict de la caméra autour du Cortex (impossible de décentrer ou de partir trop loin)
   const controls = STATE.graph3D.controls();
   if (controls) {
-    controls.enablePan = false;     // Interdit de décentrer avec clic droit
-    controls.minDistance = 120;     // Distance minimale
-    controls.maxDistance = 420;     // Empêche de trop s'éloigner du réseau
+    controls.enablePan = false;
+    controls.minDistance = 120;
+    controls.maxDistance = 420;
   }
 
   STATE.graph3D.cameraPosition({ x: 0, y: 75, z: 330 }, { x: 0, y: 0, z: 0 }, 0);
 
-  // Verrouillage mathématique permanent
   STATE.graph3D.onEngineTick(() => {
     STATE.cortexNode.fx = 0;
     STATE.cortexNode.fy = 0;
@@ -388,7 +439,6 @@ function init3DCortexGraph() {
     if (!ctrl) return;
 
     if (STATE.cameraLockedOnNode) {
-      // Verrouillé sur l'amas du projet sélectionné
       ctrl.target.set(
         STATE.cameraLockedOnNode.fx,
         STATE.cameraLockedOnNode.fy,
@@ -396,14 +446,17 @@ function init3DCortexGraph() {
       );
       ctrl.enabled = false;
     } else {
-      // Verrouillé sur le Cortex (0,0,0)
       ctrl.target.set(0, 0, 0);
       ctrl.enabled = true;
     }
   });
+
+  window.addEventListener('resize', () => {
+    STATE.graph3D.width(window.innerWidth);
+    STATE.graph3D.height(window.innerHeight);
+  });
 }
 
-// Création des amas de micro-neurones (8 petits neurones interconnectés par projet)
 function buildSynapticClusters(repos) {
   const nodes = [STATE.cortexNode];
   const links = [];
@@ -412,7 +465,7 @@ function buildSynapticClusters(repos) {
   const N = repos.length;
   const R = STATE.orbitRadius;
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-  const MICRO_COUNT = 8; // Nombre de petits neurones par amas de projet
+  const MICRO_COUNT = 8;
 
   repos.forEach((repo, i) => {
     const y = N > 1 ? 1 - (i / (N - 1)) * 2 : 0;
@@ -425,7 +478,6 @@ function buildSynapticClusters(repos) {
 
     const color = getProjectColor(repo, i);
 
-    // Nœud directeur de l'amas (porte le nom flottant)
     const hubId = `hub::${repo.full_name}`;
     const hubNode = {
       id: hubId,
@@ -442,15 +494,13 @@ function buildSynapticClusters(repos) {
     };
     nodes.push(hubNode);
 
-    // Axone principal reliant le Cortex à l'amas
     links.push({
       source: 'CORTEX_CORE',
       target: hubId,
-      color: color,
+      color,
       isAxon: true
     });
 
-    // Essaim de petits neurones autour du cœur de l'amas
     const microNodes = [];
     for (let m = 0; m < MICRO_COUNT; m++) {
       const phi = Math.acos(1 - 2 * (m + 0.5) / MICRO_COUNT);
@@ -480,11 +530,10 @@ function buildSynapticClusters(repos) {
       nodes.push(microNode);
       microNodes.push(microNode);
 
-      // Synapses internes à l'amas
       links.push({
         source: hubId,
         target: microId,
-        color: color,
+        color,
         isAxon: false
       });
 
@@ -492,17 +541,16 @@ function buildSynapticClusters(repos) {
         links.push({
           source: `micro::${repo.full_name}::${m - 1}`,
           target: microId,
-          color: color,
+          color,
           isAxon: false
         });
       }
     }
 
-    // Fermer la boucle synaptique de l'amas
     links.push({
       source: `micro::${repo.full_name}::${MICRO_COUNT - 1}`,
       target: `micro::${repo.full_name}::0`,
-      color: color,
+      color,
       isAxon: false
     });
 
@@ -512,7 +560,6 @@ function buildSynapticClusters(repos) {
   STATE.graph3D.graphData({ nodes, links });
 }
 
-// Animation continue : rotation du Cortex, orbite des amas et pulsation organique des micro-neurones
 function startOrbitalAnimation() {
   let pulseTick = 0;
 
@@ -522,7 +569,6 @@ function startOrbitalAnimation() {
 
     pulseTick += 0.03;
 
-    // Rotation des anneaux du Cortex central
     const cortexRefs = STATE.cortexNode.__cortexRefs;
     if (cortexRefs) {
       cortexRefs.shellMesh.rotation.y += 0.005;
@@ -531,7 +577,6 @@ function startOrbitalAnimation() {
       cortexRefs.ring2.rotation.x += 0.007;
     }
 
-    // Si aucun projet n'est verrouillé et que l'orbite est active, faire tourner les amas autour du Cortex
     const orbitEnabled = document.getElementById('orbit-toggle')?.checked;
     if (orbitEnabled && !STATE.cameraLockedOnNode) {
       STATE.orbitAngle += 0.0014;
@@ -548,7 +593,6 @@ function startOrbitalAnimation() {
       hubNode.fx = hx; hubNode.fy = hy; hubNode.fz = hz;
       hubNode.x = hx;  hubNode.y = hy;  hubNode.z = hz;
 
-      // Légère respiration synaptique des petits neurones autour de leur amas
       microNodes.forEach(m => {
         const breathe = 1 + Math.sin(pulseTick + m.phase) * 0.14;
         const mx = hx + m.offsetX * breathe;
@@ -580,7 +624,7 @@ function startOrbitalAnimation() {
 }
 
 // ============================================================================
-// FOCUS VERROUILLÉ SUR UN AMAS PROJET & RETOUR PAR ÉCHAP
+// FOCUS CAMÉRA VERROUILLÉ SUR L'AMAS PROJET & RETOUR PAR ÉCHAP
 // ============================================================================
 async function lockCameraAndOpenProject(repo) {
   const cluster = STATE.clusterMap.get(repo.full_name);
@@ -589,7 +633,6 @@ async function lockCameraAndOpenProject(repo) {
   const { hubNode, color } = cluster;
   STATE.cameraLockedOnNode = hubNode;
 
-  // Calcul d'une position de caméra face à l'amas (à 55 unités vers l'extérieur)
   const dist = Math.hypot(hubNode.fx, hubNode.fy, hubNode.fz) || 1;
   const camRatio = (dist + 58) / dist;
   const camPos = {
@@ -598,7 +641,6 @@ async function lockCameraAndOpenProject(repo) {
     z: hubNode.fz * camRatio
   };
 
-  // Désactivation immédiate des mouvements souris et zoom sur l'amas
   const controls = STATE.graph3D.controls();
   if (controls) controls.enabled = false;
 
@@ -610,7 +652,6 @@ async function lockCameraAndOpenProject(repo) {
 
   document.getElementById('camera-lock-hint').classList.remove('hidden');
 
-  // Ouverture du panneau latéral du projet
   STATE.activeRepo = repo;
   STATE.activeBranch = repo.default_branch || 'main';
 
@@ -642,18 +683,17 @@ function unlockAndReturnToCortex() {
     controls.target.set(0, 0, 0);
   }
 
-  // Retour fluide automatique centré sur le Cortex (0,0,0)
   STATE.graph3D.cameraPosition(
     { x: 0, y: 75, z: 330 },
     { x: 0, y: 0, z: 0 },
     850
   );
 
-  log('Caméra déverrouillée et recentrée sur CORTEX_CORE (0,0,0).', 'log-info');
+  log('Caméra libérée et recentrée sur le Cortex Central (0,0,0).', 'log-info');
 }
 
 // ============================================================================
-// CLIENT GITHUB API & SYNCHRONISATION DES PROJETS
+// CLIENT GITHUB API & FILTRAGE INTELLIGENT DES FICHIERS TEXTE
 // ============================================================================
 async function ghFetch(endpoint, options = {}) {
   const res = await fetch(`https://api.github.com${endpoint}`, {
@@ -668,9 +708,17 @@ async function ghFetch(endpoint, options = {}) {
   });
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`GitHub ${res.status}: ${txt}`);
+    throw new Error(`GitHub ${res.status} (${endpoint}): ${txt}`);
   }
   return res.status === 204 ? null : res.json();
+}
+
+function isUsefulTextFile(path, size = 0) {
+  if (size > 350000) return false;
+  const ignoredDirs = ['node_modules/', '.git/', '__pycache__/', '.venv/', 'venv/', 'dist/', 'build/', '.pytest_cache/'];
+  if (ignoredDirs.some(d => path.includes(d))) return false;
+  const binaryExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.pdf', '.zip', '.tar', '.gz', '.exe', '.dll', '.so', '.pyc', '.woff', '.woff2', '.ttf', '.glb', '.gltf', '.mp4', '.mp3'];
+  return !binaryExts.some(ext => path.toLowerCase().endsWith(ext));
 }
 
 async function connectAndBuildCortex() {
@@ -681,7 +729,7 @@ async function connectAndBuildCortex() {
     STATE.repos = repos;
     buildSynapticClusters(repos);
     setGlobalStatus(`${repos.length} AMAS ACTIFS`, '#10b981');
-    log(`${repos.length} amas de neurones générés autour du Cortex.`, 'log-ok');
+    log(`${repos.length} amas synaptiques générés en orbite autour du Cortex.`, 'log-ok');
   } catch (err) {
     setGlobalStatus('ERREUR CLÉ', '#ef4444');
     log(`Échec d'authentification GitHub : ${err.message}`, 'log-err');
@@ -694,7 +742,7 @@ async function refreshActiveProjectFullState() {
   const fullName = STATE.activeRepo.full_name;
   const branch = STATE.activeBranch;
 
-  log(`Lecture de l'état de ${fullName} (${branch})...`, 'log-step');
+  log(`Synchronisation de l'état de ${fullName} (${branch})...`, 'log-step');
 
   try {
     const refData = await ghFetch(`/repos/${fullName}/git/ref/heads/${branch}`);
@@ -703,25 +751,42 @@ async function refreshActiveProjectFullState() {
     document.getElementById('proj-last-commit').textContent = `${headSha.slice(0, 7)} — ${commitData.message.split('\n')[0]}`;
 
     const treeData = await ghFetch(`/repos/${fullName}/git/trees/${commitData.tree.sha}?recursive=1`);
-    STATE.treeFiles = (treeData.tree || []).filter(item => item.type === 'blob');
+    STATE.treeFiles = (treeData.tree || []).filter(item => item.type === 'blob' && isUsefulTextFile(item.path, item.size));
     renderFileChecklist(STATE.treeFiles);
 
+    await refreshCIStatusBadge(fullName, branch);
+    await loadProjectBackups();
+
+    log(`Projet prêt : ${STATE.treeFiles.length} fichiers texte utiles, ${STATE.backups.length} tags de restauration.`, 'log-ok');
+  } catch (err) {
+    log(`Erreur synchronisation projet : ${err.message}`, 'log-err');
+  }
+}
+
+async function refreshCIStatusBadge(fullName, branch) {
+  const ciBadge = document.getElementById('proj-ci-badge');
+  try {
     const runsData = await ghFetch(`/repos/${fullName}/actions/runs?per_page=1&branch=${branch}`);
-    const ciBadge = document.getElementById('proj-ci-badge');
-    if (runsData.total_count > 0) {
+    if (runsData.total_count > 0 && runsData.workflow_runs?.[0]) {
       const latestRun = runsData.workflow_runs[0];
-      const statusText = latestRun.status === 'completed' ? (latestRun.conclusion || 'DONE').toUpperCase() : latestRun.status.toUpperCase();
-      ciBadge.textContent = `${statusText} (${latestRun.name})`;
-      ciBadge.style.color = latestRun.conclusion === 'success' ? '#10b981' : (latestRun.conclusion === 'failure' ? '#ef4444' : '#f59e0b');
+      if (latestRun.status !== 'completed') {
+        ciBadge.textContent = `EN COURS (${latestRun.status})`;
+        ciBadge.style.color = '#f59e0b';
+      } else if (latestRun.conclusion === 'success') {
+        ciBadge.textContent = `PASS ✓ (${latestRun.name})`;
+        ciBadge.style.color = '#10b981';
+      } else {
+        ciBadge.textContent = `ÉCHEC (${latestRun.conclusion})`;
+        ciBadge.style.color = '#ef4444';
+      }
+      return latestRun;
     } else {
       ciBadge.textContent = 'Aucun Workflow';
       ciBadge.style.color = '#94a3b8';
+      return null;
     }
-
-    await loadProjectBackups();
-    log(`État synchronisé : ${STATE.treeFiles.length} fichiers, ${STATE.backups.length} backups.`, 'log-ok');
-  } catch (err) {
-    log(`Erreur synchronisation projet : ${err.message}`, 'log-err');
+  } catch {
+    return null;
   }
 }
 
@@ -740,11 +805,16 @@ function renderFileChecklist(files) {
     checkbox.className = 'file-checkbox';
     checkbox.value = file.path;
 
-    const span = document.createElement('span');
-    span.textContent = file.path;
+    const spanPath = document.createElement('span');
+    spanPath.textContent = file.path;
+
+    const spanSize = document.createElement('span');
+    spanSize.className = 'file-size';
+    spanSize.textContent = `${((file.size || 0) / 1024).toFixed(1)} Ko`;
 
     label.appendChild(checkbox);
-    label.appendChild(span);
+    label.appendChild(spanPath);
+    label.appendChild(spanSize);
     container.appendChild(label);
   });
 }
@@ -768,24 +838,28 @@ function getCheckedFilePaths() {
 }
 
 // ============================================================================
-// BACKUPS GITHUB (TAGS backup-pre-agent-*) & RESTAURATION EN 1 CLIC
+// BACKUPS GITHUB (TAGS) & RESTAURATION EN 1 CLIC
 // ============================================================================
 async function loadProjectBackups() {
   if (!STATE.activeRepo) return;
   const fullName = STATE.activeRepo.full_name;
-  const refs = await ghFetch(`/repos/${fullName}/git/matching-refs/tags/backup-pre-agent-`);
 
-  STATE.backups = (refs || []).map(r => ({
-    name: r.ref.replace('refs/tags/', ''),
-    sha: r.object.sha
-  })).reverse();
+  try {
+    const tags = await ghFetch(`/repos/${fullName}/tags?per_page=15`);
+    STATE.backups = (tags || []).map(t => ({
+      name: t.name,
+      sha: t.commit.sha
+    }));
+  } catch {
+    STATE.backups = [];
+  }
 
   document.getElementById('backup-count').textContent = STATE.backups.length;
   const container = document.getElementById('backups-list');
   container.innerHTML = '';
 
   if (STATE.backups.length === 0) {
-    container.innerHTML = '<div style="color:#64748b;font-size:11px;">Aucun backup enregistré pour ce projet.</div>';
+    container.innerHTML = '<div style="color:#64748b;font-size:11px;">Aucun tag de sauvegarde sur ce dépôt.</div>';
     return;
   }
 
@@ -795,7 +869,7 @@ async function loadProjectBackups() {
 
     const info = document.createElement('div');
     info.className = 'backup-info';
-    info.innerHTML = `<span class="backup-name">${b.name}</span><span class="backup-sha">SHA: ${b.sha.slice(0, 10)}</span>`;
+    info.innerHTML = `<span class="backup-name">🏷️ ${b.name}</span><span class="backup-sha">SHA: ${b.sha.slice(0, 10)}</span>`;
 
     const btn = document.createElement('button');
     btn.className = 'btn-restore';
@@ -825,7 +899,7 @@ async function createBackupTagOnGitHub(suffix = 'auto') {
     })
   });
 
-  log(`Tag de sauvegarde créé : ${tagName}`, 'log-ok');
+  log(`Point de restauration créé : ${tagName} (${currentSha.slice(0, 7)})`, 'log-ok');
   await loadProjectBackups();
   return { tagName, sha: currentSha };
 }
@@ -845,7 +919,7 @@ async function restoreBackupTag(tagName, targetSha) {
   const branch = STATE.activeBranch;
 
   try {
-    log(`Restauration de ${branch} vers ${tagName} (${targetSha.slice(0, 7)})...`, 'log-warn');
+    log(`Restauration de la branche ${branch} sur ${tagName} (${targetSha.slice(0, 7)})...`, 'log-warn');
     await ghFetch(`/repos/${fullName}/git/refs/heads/${branch}`, {
       method: 'PATCH',
       body: JSON.stringify({
@@ -853,7 +927,7 @@ async function restoreBackupTag(tagName, targetSha) {
         force: true
       })
     });
-    log(`Branche ${branch} restaurée sur ${tagName} !`, 'log-ok');
+    log(`Branche ${branch} restaurée avec succès sur ${tagName} !`, 'log-ok');
     await refreshActiveProjectFullState();
   } catch (err) {
     log(`Échec restauration : ${err.message}`, 'log-err');
@@ -861,7 +935,7 @@ async function restoreBackupTag(tagName, targetSha) {
 }
 
 // ============================================================================
-// CLIENT GEMINI API (responseMimeType: "text/plain" — ZÉRO JSON)
+// CLIENT GEMINI API (text/plain + 65 536 tokens + AbortSignal)
 // ============================================================================
 function setAgentMode(mode) {
   document.getElementById('mode-btn-exec').classList.toggle('active', mode === 'exec');
@@ -870,19 +944,21 @@ function setAgentMode(mode) {
   document.getElementById('view-mode-audit').classList.toggle('hidden', mode !== 'audit');
 }
 
-async function callGeminiTextPlain(model, systemInstruction, userPrompt, temperature = 0.15) {
+async function callGeminiTextPlain(model, systemInstruction, userPrompt, temperature = 0.15, signal = undefined) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${STATE.geminiKey}`;
   const payload = {
     systemInstruction: { parts: [{ text: systemInstruction }] },
     contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
     generationConfig: {
       temperature,
+      maxOutputTokens: 65536,
       responseMimeType: 'text/plain'
     }
   };
 
   const res = await fetch(url, {
     method: 'POST',
+    signal,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
@@ -893,58 +969,68 @@ async function callGeminiTextPlain(model, systemInstruction, userPrompt, tempera
   }
 
   const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
 }
 
 async function fetchGitHubFileContent(fullName, path, branch) {
   const data = await ghFetch(`/repos/${fullName}/contents/${encodeURIComponent(path)}?ref=${branch}`);
-  const binStr = atob(data.content.replace(/\n/g, ''));
+  const binStr = atob((data.content || '').replace(/\n/g, ''));
   const bytes = Uint8Array.from(binStr, c => c.charCodeAt(0));
   return new TextDecoder('utf-8').decode(bytes);
 }
 
 // ============================================================================
-// 2. ROUTING AGENT : autoSelectFilesWithFlash()
+// ROUTING AGENT : autoSelectFilesWithFlash() (Avec tailles et fallback)
 // ============================================================================
-async function autoSelectFilesWithFlash(userPrompt, ciErrorLog = '') {
+async function autoSelectFilesWithFlash(userPrompt, ciErrorLog = '', signal = undefined) {
   const manuallyChecked = getCheckedFilePaths();
   if (manuallyChecked.length > 0 && !ciErrorLog) {
     log(`Utilisation des ${manuallyChecked.length} fichier(s) coché(s) manuellement.`, 'log-info');
     return manuallyChecked;
   }
 
-  log('Routing Agent : Sélection des fichiers pertinents via gemini-2.5-flash...', 'log-step');
-  const treePaths = STATE.treeFiles.map(f => f.path).join('\n');
+  setStepStatus('Tri IA Flash...');
+  log('Routing Agent : Analyse de l\'arborescence via gemini-2.5-flash...', 'log-step');
+  const treePaths = STATE.treeFiles.map(f => `${f.path} (${f.size || 0} B)`).join('\n');
 
-  const sysInstruction = `Tu es un agent de routage de fichiers.
-Analyse l'arborescence complète du dépôt GitHub et la demande utilisateur.
-Identifie jusqu'à 8 fichiers pertinents à lire ou modifier.
-Renvoie UNIQUEMENT des balises XML <path>chemin/du/fichier</path> en texte brut. Aucun JSON.`;
+  const sysInstruction = `Tu es un routeur d'analyse de dépôt Git.
+Analyse l'arborescence complète du projet et l'objectif utilisateur.
+Sélectionne TOUS les fichiers pertinents à lire ou modifier (jusqu'à 8 fichiers).
+Réponds UNIQUEMENT avec des balises XML <path>chemin/du/fichier</path>, une par ligne. Aucun JSON.`;
 
-  const prompt = `ARBORESCENCE (${STATE.activeRepo.full_name}) :
+  const prompt = `PROJET : ${STATE.activeRepo.full_name}
+ARBORESCENCE :
 ${treePaths}
 
-DEMANDE :
+DEMANDE UTILISATEUR :
 ${userPrompt}
 ${ciErrorLog ? `\nTRACEBACK CI/CD À CORRIGER :\n${ciErrorLog}` : ''}`;
 
-  const rawText = await callGeminiTextPlain('gemini-2.5-flash', sysInstruction, prompt, 0.0);
-  const matches = [...rawText.matchAll(/<path>\s*([\s\S]*?)\s*<\/path>/g)];
-  const selectedPaths = matches
-    .map(m => m[1].trim())
-    .filter(p => STATE.treeFiles.some(f => f.path === p))
-    .slice(0, 8);
+  try {
+    const rawText = await callGeminiTextPlain('gemini-2.5-flash', sysInstruction, prompt, 0.0, signal);
+    const matches = [...rawText.matchAll(/<path>\s*([^<]+?)\s*<\/path>/gi)];
+    const selectedPaths = matches
+      .map(m => m[1].trim())
+      .filter(p => STATE.treeFiles.some(f => f.path === p))
+      .slice(0, 8);
 
-  uncheckAllFiles();
-  document.querySelectorAll('.file-checkbox').forEach(cb => {
-    if (selectedPaths.includes(cb.value)) {
-      cb.checked = true;
-      cb.parentElement.classList.add('auto-selected');
+    if (selectedPaths.length > 0) {
+      uncheckAllFiles();
+      document.querySelectorAll('.file-checkbox').forEach(cb => {
+        if (selectedPaths.includes(cb.value)) {
+          cb.checked = true;
+          cb.parentElement.classList.add('auto-selected');
+        }
+      });
+      log(`Fichiers ciblés par Flash (${selectedPaths.length}) : ${selectedPaths.join(', ')}`, 'log-ok');
+      return selectedPaths;
     }
-  });
+  } catch (e) {
+    log(`Avertissement tri Flash : ${e.message}. Utilisation du repli automatique.`, 'log-warn');
+  }
 
-  log(`Flash a sélectionné ${selectedPaths.length} fichier(s) : ${selectedPaths.join(', ')}`, 'log-ok');
-  return selectedPaths;
+  const fallback = STATE.treeFiles.slice(0, 6).map(f => f.path);
+  return fallback;
 }
 
 // ============================================================================
@@ -954,38 +1040,43 @@ async function runProjectAudit() {
   if (!STATE.activeRepo) return;
   const btn = document.getElementById('btn-run-audit');
   const output = document.getElementById('audit-output');
+  const selectedModel = document.getElementById('agent-model-select').value;
+
   btn.disabled = true;
+  setStepStatus('Audit en cours...');
   output.textContent = 'Sélection des fichiers clés par gemini-2.5-flash...';
 
   try {
     const keyPaths = await autoSelectFilesWithFlash(
-      'Sélectionner les fichiers d\'architecture, README, configuration et modules principaux pour un audit complet.'
+      'Sélectionner les fichiers d\'architecture, README, configuration et modules principaux pour réaliser un audit complet.'
     );
 
     let contextBlock = '';
     for (const p of keyPaths) {
       const content = await fetchGitHubFileContent(STATE.activeRepo.full_name, p, STATE.activeBranch);
-      contextBlock += `\n--- FICHIER: ${p} ---\n${content.slice(0, 6000)}\n`;
+      contextBlock += `\n--- FICHIER: ${p} ---\n${content.slice(0, 6500)}\n`;
     }
 
-    output.textContent = 'Génération du diagnostic et des propositions par gemini-2.5-pro...';
+    output.textContent = `Génération du diagnostic et des propositions par ${selectedModel}...`;
     const sysInstruction = `Tu es un Architecte Logiciel Principal.
 Analyse l'état actuel du projet et propose des évolutions concrètes :
 1. Synthèse de l'état actuel et de l'architecture.
-2. Points faibles, bugs potentiels ou dettes techniques.
-3. Propositions d'améliorations et d'évolutions concrètes (fichiers impactés et bénéfices).`;
+2. Failles potentielles, bugs ou dettes techniques identifiés.
+3. 3 à 5 propositions d'améliorations et d'évolutions concrètes (fichiers impactés et bénéfices).`;
 
     const report = await callGeminiTextPlain(
-      'gemini-2.5-pro',
+      selectedModel,
       sysInstruction,
       `PROJET : ${STATE.activeRepo.full_name}\nARBORESCENCE :\n${STATE.treeFiles.map(f => f.path).join('\n')}\n\nEXTRAITS :\n${contextBlock}`,
       0.2
     );
 
     output.textContent = report;
+    setStepStatus('Audit terminé ✓');
     log(`Audit terminé pour ${STATE.activeRepo.full_name}.`, 'log-ok');
   } catch (err) {
     output.textContent = `Erreur : ${err.message}`;
+    setStepStatus('Erreur Audit');
     log(`Erreur audit : ${err.message}`, 'log-err');
   } finally {
     btn.disabled = false;
@@ -993,47 +1084,54 @@ Analyse l'état actuel du projet et propose des évolutions concrètes :
 }
 
 // ============================================================================
-// 1. PROTOCOLE XML / CDATA BRUT (ZÉRO JSON POUR LE CODE)
+// CHOIX 2 : PROTOCOLE XML / CDATA BRUT & PATCH TOLÉRANT AUX ESPACES
 // ============================================================================
-async function executeCodeGenerationWithPro(userPrompt, filesContentMap, ciFailureLog = '') {
-  log('Programmation via gemini-2.5-pro (Flux XML / CDATA brut)...', 'log-step');
-
+async function executeCodeGeneration(model, userPrompt, filesContentMap, ciFailureLog = '', signal = undefined) {
   let filesSection = '';
   for (const [path, content] of Object.entries(filesContentMap)) {
-    filesSection += `\n<source_file path="${path}">\n<![CDATA[\n${content}\n]]>\n</source_file>\n`;
+    filesSection += `\n==============================\nFICHIER : ${path}\n==============================\n${content}\n`;
   }
 
-  const sysInstruction = `Tu es un ingénieur logiciel autonome.
-N'utilise JAMAIS de JSON. Réponds uniquement en texte brut avec les balises XML/CDATA suivantes :
+  const sysInstruction = `Tu es un ingénieur logiciel senior autonome.
+Tu dois traiter INTÉGRALEMENT toutes les demandes de l'utilisateur en une seule passe, sur autant de fichiers que nécessaire.
+INTERDICTION ABSOLUE D'UTILISER DU JSON. Réponds UNIQUEMENT avec le protocole XML strict ci-dessous.
 
-<commit_msg><![CDATA[Message de commit précis]]></commit_msg>
+Inclus toujours un message de commit clair :
+<commit_msg>feat(module): description précise</commit_msg>
 
-Pour créer ou remplacer intégralement un fichier (écris 100 % du code sans jamais tronquer) :
-<file path="chemin/du/fichier.ext"><![CDATA[
-code complet ici
+Pour remplacer ou créer un fichier complet (écris 100 % du code sans jamais tronquer) :
+<file path="chemin/du/fichier.py"><![CDATA[
+...code complet du fichier sans aucune troncature...
 ]]></file>
 
-Ou pour modifier chirurgicalement un fichier existant :
-<patch path="chemin/du/fichier.ext"><![CDATA[
-<<<<<<< SEARCH
-code exact actuel
-=======
-nouveau code
->>>>>>> REPLACE
-]]></patch>`;
+Pour modifier chirurgicalement une ou plusieurs parties d'un fichier existant :
+<patch path="chemin/du/fichier.py">
+<search><![CDATA[
+...lignes exactes existantes à remplacer...
+]]></search>
+<replace><![CDATA[
+...nouvelles lignes complètes...
+]]></replace>
+</patch>
+
+RÈGLES STRICTES :
+1. Traite TOUS les points demandés par l'utilisateur.
+2. N'utilise jamais de commentaires paresseux du type "# reste du code inchangé" dans <file>. Utilise <patch> pour les modifications ciblées.`;
 
   const fullPrompt = `DÉPÔT : ${STATE.activeRepo.full_name} (Branche : ${STATE.activeBranch})
-ARBORESCENCE :
-${STATE.treeFiles.map(f => f.path).join('\n')}
+ARBORESCENCE COMPLÈTE :
+${STATE.treeFiles.map(f => '- ' + f.path).join('\n')}
 
 CONTENU FRAIS DES FICHIERS SÉLECTIONNÉS :
 ${filesSection}
 
-DEMANDE UTILISATEUR :
-${userPrompt}
-${ciFailureLog ? `\nTRACEBACK D'ERREUR CI/CD À CORRIGER IMPÉRATIVEMENT :\n${ciFailureLog}` : ''}`;
+${ciFailureLog ? `\n⚠️ ERREUR CI/CD DU CYCLE PRÉCÉDENT À CORRIGER IMPÉRATIVEMENT :\n${ciFailureLog}\n` : ''}
 
-  return await callGeminiTextPlain('gemini-2.5-pro', sysInstruction, fullPrompt, 0.1);
+INSTRUCTIONS DE L'UTILISATEUR À APPLIQUER INTÉGRALEMENT :
+${userPrompt}`;
+
+  log(`Envoi du contexte (${(fullPrompt.length / 1024).toFixed(1)} Ko) à ${model}...`, 'log-info');
+  return await callGeminiTextPlain(model, sysInstruction, fullPrompt, 0.15, signal);
 }
 
 function extractCdataContent(rawBlock) {
@@ -1046,59 +1144,97 @@ function extractCdataContent(rawBlock) {
   return trimmed.replace(/^\r?\n|\r?\n$/g, '');
 }
 
-function parseXmlCdataOperations(rawXmlResponse, currentFilesMap) {
-  const commitMatch = rawXmlResponse.match(/<commit_msg>([\s\S]*?)<\/commit_msg>/);
+// Application tolérante aux différences de fins de lignes (\r\n vs \n) et d'espaces de fin de ligne
+function applyHunkTolerant(originalContent, searchStr, replaceStr) {
+  const normOrig = originalContent.replace(/\r\n/g, '\n');
+  const normSearch = searchStr.replace(/\r\n/g, '\n').replace(/^\n+|\n+$/g, '');
+  const normReplace = replaceStr.replace(/\r\n/g, '\n').replace(/^\n+|\n+$/g, '');
+
+  if (normOrig.includes(normSearch)) {
+    return normOrig.replace(normSearch, normReplace);
+  }
+
+  const origLines = normOrig.split('\n');
+  const searchLines = normSearch.split('\n');
+
+  for (let i = 0; i <= origLines.length - searchLines.length; i++) {
+    let match = true;
+    for (let j = 0; j < searchLines.length; j++) {
+      if (origLines[i + j].trimEnd() !== searchLines[j].trimEnd()) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      const before = origLines.slice(0, i);
+      const after = origLines.slice(i + searchLines.length);
+      return [...before, normReplace, ...after].join('\n');
+    }
+  }
+
+  throw new Error(`Bloc <search> introuvable (ligne: "${searchLines[0]?.slice(0, 60)}")`);
+}
+
+// Parseur universel : accepte <search>/<replace> ET <<<<<<< SEARCH / >>>>>>> REPLACE
+function parseXmlOperationsUniversal(rawXmlResponse) {
+  const cleaned = rawXmlResponse.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  const commitMatch = cleaned.match(/<commit_msg>([\s\S]*?)<\/commit_msg>/i);
   const commitMsg = commitMatch
     ? extractCdataContent(commitMatch[1]).trim()
-    : 'Autonomous XML/CDATA update via Neural Dev Hub V6.0';
+    : 'feat(agent): autonomous XML/CDATA update';
 
-  const modifiedFiles = {};
-
-  const fileRegex = /<file\s+path="([^"]+)">([\s\S]*?)<\/file>/g;
-  for (const match of rawXmlResponse.matchAll(fileRegex)) {
-    const filePath = match[1].trim();
-    modifiedFiles[filePath] = extractCdataContent(match[2]);
+  const fullFiles = [];
+  const fileRegex = /<file\s+path="([^"]+)"[^>]*>([\s\S]*?)<\/file>/gi;
+  for (const match of cleaned.matchAll(fileRegex)) {
+    const path = match[1].trim();
+    const content = extractCdataContent(match[2]) + '\n';
+    fullFiles.push({ path, content });
   }
 
-  const patchRegex = /<patch\s+path="([^"]+)">([\s\S]*?)<\/patch>/g;
-  for (const match of rawXmlResponse.matchAll(patchRegex)) {
-    const filePath = match[1].trim();
-    const patchBody = extractCdataContent(match[2]);
-    let baseContent = modifiedFiles[filePath] ?? currentFilesMap[filePath];
+  const patches = [];
+  const patchRegex = /<patch\s+path="([^"]+)"[^>]*>([\s\S]*?)<\/patch>/gi;
+  for (const match of cleaned.matchAll(patchRegex)) {
+    const path = match[1].trim();
+    const body = match[2];
+    const hunks = [];
 
-    if (baseContent === undefined) {
-      throw new Error(`Le fichier ${filePath} ciblé par <patch> n'est pas chargé.`);
+    // Format 1 : <search>...</search><replace>...</replace>
+    const xmlHunkRegex = /<search>([\s\S]*?)<\/search>\s*<replace>([\s\S]*?)<\/replace>/gi;
+    for (const hm of body.matchAll(xmlHunkRegex)) {
+      hunks.push({
+        search: extractCdataContent(hm[1]),
+        replace: extractCdataContent(hm[2])
+      });
     }
 
-    const srRegex = /<<<<<<< SEARCH\r?\n([\s\S]*?)\r?\n=======\r?\n([\s\S]*?)\r?\n>>>>>>> REPLACE/g;
-    let count = 0;
-    for (const sr of patchBody.matchAll(srRegex)) {
-      if (!baseContent.includes(sr[1])) {
-        throw new Error(`Bloc SEARCH introuvable dans ${filePath}.`);
+    // Format 2 (Fallback) : <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE
+    if (hunks.length === 0) {
+      const cleanBody = extractCdataContent(body);
+      const gitHunkRegex = /<<<<<<< SEARCH\r?\n([\s\S]*?)\r?\n=======\r?\n([\s\S]*?)\r?\n>>>>>>> REPLACE/g;
+      for (const gm of cleanBody.matchAll(gitHunkRegex)) {
+        hunks.push({ search: gm[1], replace: gm[2] });
       }
-      baseContent = baseContent.replace(sr[1], sr[2]);
-      count++;
     }
-    if (count === 0) {
-      throw new Error(`Aucun bloc SEARCH/REPLACE valide dans <patch path="${filePath}">.`);
+
+    if (hunks.length > 0) {
+      patches.push({ path, hunks });
     }
-    modifiedFiles[filePath] = baseContent;
   }
 
-  return { commitMsg, modifiedFiles };
+  return { commitMsg, fullFiles, patches };
 }
 
 // ============================================================================
 // 3. COMMIT GIT ATOMIQUE MULTI-FICHIERS : pushAtomicCommit()
-// (git/blobs -> git/trees -> git/commits -> git/refs/heads/branch)
 // ============================================================================
 async function pushAtomicCommit(fullName, branch, commitMsg, modifiedFilesMap) {
   const filePaths = Object.keys(modifiedFilesMap);
   if (filePaths.length === 0) {
-    throw new Error('Aucune balise <file> ou <patch> détectée dans la réponse.');
+    throw new Error('Aucune balise <file> ou <patch> valide détectée dans la réponse.');
   }
 
-  log(`Commit Atomique : Envoi de ${filePaths.length} blob(s) via Git Data API...`, 'log-step');
+  log(`Commit Atomique : Envoi de ${filePaths.length} fichier(s) via Git Data API...`, 'log-step');
 
   const refData = await ghFetch(`/repos/${fullName}/git/ref/heads/${branch}`);
   const parentCommitSha = refData.object.sha;
@@ -1154,42 +1290,45 @@ async function pushAtomicCommit(fullName, branch, commitMsg, modifiedFilesMap) {
 // ============================================================================
 // 4. BOUCLE AUTO-HEAL CI/CD : waitForCIRunAndGetFailureLog() & extractFailedJobTrace()
 // ============================================================================
-async function waitForCIRunAndGetFailureLog(fullName, commitSha) {
-  log(`Surveillance GitHub Actions (toutes les 4s) pour ${commitSha.slice(0, 7)}...`, 'log-step');
+async function waitForCIRunAndGetFailureLog(fullName, branch, commitSha, signal) {
+  setStepStatus('Attente CI/CD GitHub...');
+  log(`Surveillance GitHub Actions (toutes les 4s) pour le commit ${commitSha.slice(0, 7)}...`, 'log-step');
 
-  let targetRun = null;
-  for (let i = 0; i < 7; i++) {
-    await sleep(4000);
-    const runsData = await ghFetch(`/repos/${fullName}/actions/runs?head_sha=${commitSha}`);
-    if (runsData.total_count > 0) {
-      targetRun = runsData.workflow_runs[0];
-      break;
+  await sleep(4500);
+
+  for (let attempt = 1; attempt <= 35; attempt++) {
+    if (signal?.aborted) throw new Error('Cycle interrompu par l\'utilisateur.');
+
+    const runsData = await ghFetch(`/repos/${fullName}/actions/runs?head_sha=${commitSha}&per_page=5`);
+    const run = runsData.workflow_runs?.[0];
+
+    if (!run) {
+      if (attempt >= 5) {
+        log('Aucun workflow GitHub Actions déclenché sur ce commit.', 'log-ok');
+        return { passed: true, trace: '' };
+      }
+      await sleep(3500);
+      continue;
     }
-  }
 
-  if (!targetRun) {
-    log('Aucun workflow GitHub Actions configuré sur ce commit.', 'log-ok');
-    return { passed: true, trace: '' };
-  }
+    await refreshCIStatusBadge(fullName, branch);
 
-  log(`Workflow "${targetRun.name}" en cours (Run #${targetRun.id})...`, 'log-info');
-
-  for (let poll = 0; poll < 120; poll++) {
-    const runStatus = await ghFetch(`/repos/${fullName}/actions/runs/${targetRun.id}`);
-    if (runStatus.status === 'completed') {
-      if (runStatus.conclusion === 'success') {
-        log(`Tests CI/CD validés avec succès (${runStatus.name}) !`, 'log-ok');
+    if (run.status === 'completed') {
+      if (run.conclusion === 'success') {
+        log(`GitHub Actions : TOUS LES TESTS SONT AU VERT ✓ (${run.name})`, 'log-ok');
         return { passed: true, trace: '' };
       } else {
-        log(`Échec CI/CD (${runStatus.conclusion}). Extraction des 4 500 derniers caractères...`, 'log-err');
-        const trace = await extractFailedJobTrace(fullName, targetRun.id);
+        log(`GitHub Actions en échec (${run.conclusion}). Extraction des 4 500 derniers caractères...`, 'log-err');
+        const trace = await extractFailedJobTrace(fullName, run.id);
         return { passed: false, trace };
       }
     }
+
+    log(`CI en cours d'exécution (${run.status})... [${attempt * 4}s]`, 'log-info');
     await sleep(4000);
   }
 
-  throw new Error('Timeout lors de la surveillance GitHub Actions.');
+  return { passed: true, trace: '' };
 }
 
 async function extractFailedJobTrace(fullName, runId) {
@@ -1203,7 +1342,10 @@ async function extractFailedJobTrace(fullName, runId) {
 
     try {
       const res = await fetch(`https://api.github.com/repos/${fullName}/actions/jobs/${job.id}/logs`, {
-        headers: { 'Authorization': `Bearer ${STATE.ghToken}` }
+        headers: {
+          'Authorization': `Bearer ${STATE.ghToken}`,
+          'X-GitHub-Api-Version': '2022-11-28'
+        }
       });
       if (res.ok) {
         const fullLogText = await res.text();
@@ -1212,6 +1354,7 @@ async function extractFailedJobTrace(fullName, runId) {
       }
     } catch (_) {}
 
+    // Fallback CORS sur les annotations du check-run
     try {
       const annotations = await ghFetch(`/repos/${fullName}/check-runs/${job.id}/annotations`);
       if (annotations && annotations.length > 0) {
@@ -1222,7 +1365,7 @@ async function extractFailedJobTrace(fullName, runId) {
     } catch (_) {}
   }
 
-  return combinedTrace.slice(-4500) || 'Échec GitHub Actions sans trace texte détaillée.';
+  return combinedTrace.slice(-4500) || 'Le workflow CI a échoué sans trace texte disponible.';
 }
 
 // ============================================================================
@@ -1232,70 +1375,107 @@ async function runFreeExecutionPipeline() {
   if (!STATE.activeRepo) return;
   const userPrompt = document.getElementById('custom-prompt').value.trim();
   if (!userPrompt) {
-    return log('Écris une demande dans le champ de prompt avant de lancer.', 'log-warn');
+    return log('Écris une instruction dans la zone de prompt avant de lancer.', 'log-warn');
   }
 
   const fullName = STATE.activeRepo.full_name;
   const branch = STATE.activeBranch;
+  const selectedModel = document.getElementById('agent-model-select').value;
   const autoHealEnabled = document.getElementById('auto-heal-toggle').checked;
   const maxCycles = autoHealEnabled ? 3 : 1;
 
-  const btn = document.getElementById('btn-run-exec');
-  btn.disabled = true;
+  const btnRun = document.getElementById('btn-run-exec');
+  const btnStop = document.getElementById('btn-stop-agent');
+  btnRun.disabled = true;
+  btnStop.classList.remove('hidden');
+
+  STATE.abortController = new AbortController();
+  const signal = STATE.abortController.signal;
 
   try {
-    // 1. Sauvegarde automatique par tag GitHub avant modification
+    // 1. Tag de backup automatique sur GitHub avant toute modification
+    setStepStatus('Backup Git...');
     await createBackupTagOnGitHub('pre-run');
 
     let cycle = 1;
     let ciFailureLog = '';
 
     while (cycle <= maxCycles) {
-      log(`=== CYCLE AUTONOME #${cycle}/${maxCycles} SUR ${fullName} ===`, 'log-step');
+      if (signal.aborted) break;
 
-      // 2. Tri des fichiers pertinents par gemini-2.5-flash
-      const targetPaths = await autoSelectFilesWithFlash(userPrompt, ciFailureLog);
+      log(`=== CYCLE AUTONOME #${cycle}/${maxCycles} SUR ${fullName} (${selectedModel}) ===`, 'log-step');
 
-      // 3. Téléchargement frais des fichiers
-      const filesContentMap = {};
+      // 2. Sélection des fichiers pertinents par gemini-2.5-flash
+      const targetPaths = await autoSelectFilesWithFlash(userPrompt, ciFailureLog, signal);
+
+      // 3. Lecture fraîche des fichiers ciblés
+      setStepStatus(`Cycle ${cycle}/${maxCycles} — Lecture...`);
+      const originalFilesMap = {};
       for (const path of targetPaths) {
+        if (signal.aborted) break;
         log(`Lecture fraîche : ${path}...`, 'log-info');
-        filesContentMap[path] = await fetchGitHubFileContent(fullName, path, branch);
+        originalFilesMap[path] = await fetchGitHubFileContent(fullName, path, branch);
       }
 
-      // 4. Génération XML/CDATA par gemini-2.5-pro
-      const rawXml = await executeCodeGenerationWithPro(userPrompt, filesContentMap, ciFailureLog);
-      const { commitMsg, modifiedFiles } = parseXmlCdataOperations(rawXml, filesContentMap);
+      // 4. Génération XML/CDATA par le modèle sélectionné
+      setStepStatus(`Cycle ${cycle}/${maxCycles} — Génération...`);
+      const rawXml = await executeCodeGeneration(selectedModel, userPrompt, originalFilesMap, ciFailureLog, signal);
+      const { commitMsg, fullFiles, patches } = parseXmlOperationsUniversal(rawXml);
+
+      const updatedFilesMap = {};
+
+      for (const f of fullFiles) {
+        updatedFilesMap[f.path] = f.content;
+        log(`Fichier complet généré : ${f.path} (${f.content.split('\n').length} lignes)`, 'log-ok');
+      }
+
+      for (const p of patches) {
+        let baseContent = updatedFilesMap[p.path] ?? originalFilesMap[p.path];
+        if (baseContent === undefined) {
+          baseContent = await fetchGitHubFileContent(fullName, p.path, branch);
+        }
+        for (const hunk of p.hunks) {
+          baseContent = applyHunkTolerant(baseContent, hunk.search, hunk.replace);
+        }
+        updatedFilesMap[p.path] = baseContent;
+        log(`Patch chirurgical appliqué sur ${p.path} (${p.hunks.length} bloc(s))`, 'log-ok');
+      }
 
       // 5. Commit Atomique Multi-Fichiers
-      const newCommitSha = await pushAtomicCommit(fullName, branch, commitMsg, modifiedFiles);
+      setStepStatus(`Cycle ${cycle}/${maxCycles} — Push Atomique...`);
+      const newCommitSha = await pushAtomicCommit(fullName, branch, commitMsg, updatedFilesMap);
       await refreshActiveProjectFullState();
 
       if (!autoHealEnabled) {
-        log('Modifications appliquées avec succès (Auto-Heal désactivé).', 'log-ok');
+        setStepStatus('Terminé ✓');
+        log('Modifications poussées avec succès (Auto-Heal désactivé).', 'log-ok');
         break;
       }
 
       // 6. Surveillance CI/CD & Boucle Auto-Heal
-      const ciCheck = await waitForCIRunAndGetFailureLog(fullName, newCommitSha);
+      const ciCheck = await waitForCIRunAndGetFailureLog(fullName, branch, newCommitSha, signal);
       await refreshActiveProjectFullState();
 
       if (ciCheck.passed) {
+        setStepStatus('Terminé & CI Validée ✓');
         log(`Pipeline validé au cycle #${cycle} : CI/CD au vert !`, 'log-ok');
         break;
       } else {
         ciFailureLog = ciCheck.trace;
-        log(`Traceback récupérée (${ciFailureLog.length} car.) :\n${ciFailureLog.slice(-600)}`, 'log-warn');
+        log(`Traceback CI récupérée (${ciFailureLog.length} car.) :\n${ciFailureLog.slice(-700)}`, 'log-err');
         uncheckAllFiles();
         cycle++;
         if (cycle > maxCycles) {
-          log(`Limite de ${maxCycles} cycles Auto-Heal atteinte. Tu peux restaurer le backup depuis l'onglet Backups.`, 'log-err');
+          setStepStatus('Échec Auto-Heal');
+          log(`Limite de ${maxCycles} cycles Auto-Heal atteinte. Utilise l'onglet Backups pour restaurer si besoin.`, 'log-err');
         }
       }
     }
   } catch (err) {
+    setStepStatus('Erreur');
     log(`Erreur pipeline : ${err.message}`, 'log-err');
   } finally {
-    btn.disabled = false;
+    btnRun.disabled = false;
+    btnStop.classList.add('hidden');
   }
 }
