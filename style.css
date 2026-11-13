@@ -1,8 +1,8 @@
 :root {
   --bg: #03050a;
-  --panel: rgba(9, 13, 24, 0.88);
+  --panel: rgba(9, 13, 24, 0.90);
   --panel-alt: #0d1424;
-  --border: rgba(0, 240, 255, 0.18);
+  --border: rgba(0, 240, 255, 0.20);
   --border-subtle: #1e293b;
   --accent: #00f0ff;
   --accent-pink: #ff2a85;
@@ -23,6 +23,7 @@
 
 body {
   background: radial-gradient(circle at center, #080d1a 0%, #020306 100%);
+  background-color: #03050a;
   color: var(--text);
   font-family: var(--font);
   overflow: hidden;
@@ -50,7 +51,7 @@ body {
   display: none !important;
 }
 
-/* Modal d'authentification première fois */
+/* Modal d'authentification */
 .auth-backdrop {
   position: fixed;
   inset: 0;
@@ -64,7 +65,8 @@ body {
 
 .auth-card {
   position: relative;
-  width: 500px;
+  width: 510px;
+  max-width: 94vw;
   padding: 26px;
   display: flex;
   flex-direction: column;
@@ -127,16 +129,21 @@ body {
   line-height: 1.3;
 }
 
+.auth-actions {
+  display: flex;
+  gap: 10px;
+}
+
 /* Barre supérieure */
 #top-bar {
   top: 12px;
   left: 12px;
   right: 12px;
-  height: 50px;
+  height: 52px;
   padding: 0 16px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .brand {
@@ -146,8 +153,16 @@ body {
   font-weight: 700;
   font-size: 13px;
   color: var(--accent);
-  letter-spacing: 1px;
+  letter-spacing: 0.8px;
   white-space: nowrap;
+}
+
+.version-tag {
+  font-size: 10px;
+  background: rgba(0, 240, 255, 0.12);
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .pulse-dot {
@@ -165,23 +180,38 @@ body {
   background: rgba(0, 240, 255, 0.1);
   border: 1px solid rgba(0, 240, 255, 0.3);
   color: var(--accent);
+  white-space: nowrap;
 }
 
 .lock-pill {
   font-size: 11px;
   padding: 4px 12px;
   border-radius: 20px;
-  background: rgba(255, 42, 133, 0.16);
+  background: rgba(255, 42, 133, 0.18);
   border: 1px solid var(--accent-pink);
   color: #ff85b3;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .top-controls {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+}
+
+.ctrl-select-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+#agent-model-select {
+  padding: 5px 8px;
+  font-size: 11px;
 }
 
 .toggle-label {
@@ -189,9 +219,10 @@ body {
   color: var(--text);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
 }
 
 /* Inputs & Boutons */
@@ -206,7 +237,7 @@ input, select, textarea, button {
   outline: none;
 }
 
-input:focus, textarea:focus {
+input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
 }
 
@@ -233,7 +264,7 @@ button:disabled {
 }
 
 .btn-xs {
-  padding: 4px 8px;
+  padding: 5px 9px;
   font-size: 11px;
   background: #162033;
   border-color: #2e3f5c;
@@ -243,6 +274,14 @@ button:disabled {
   background: rgba(239, 68, 68, 0.12);
   border-color: var(--danger);
   color: #fca5a5;
+}
+
+.btn-danger {
+  background: var(--danger);
+  border-color: #f87171;
+  color: #fff;
+  padding: 10px 14px;
+  white-space: nowrap;
 }
 
 .btn-primary {
@@ -260,14 +299,15 @@ button:disabled {
   font-size: 11px;
   font-weight: 700;
   background: #1e293b;
+  white-space: nowrap;
 }
 
 /* Terminal en bas à gauche */
 #log-drawer {
   left: 12px;
   bottom: 12px;
-  width: 500px;
-  height: 230px;
+  width: 520px;
+  height: 240px;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -283,9 +323,24 @@ button:disabled {
   color: var(--accent);
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.step-pill {
+  background: rgba(0, 240, 255, 0.14);
+  color: var(--accent);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 10px;
+}
+
 #terminal {
   flex: 1;
-  background: rgba(3, 5, 10, 0.85);
+  background: rgba(3, 5, 10, 0.88);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 8px;
@@ -307,7 +362,8 @@ button:disabled {
   top: 74px;
   right: 12px;
   bottom: 12px;
-  width: 510px;
+  width: 530px;
+  max-width: 95vw;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -472,6 +528,11 @@ button:disabled {
   line-height: 1.45;
 }
 
+.exec-actions-row {
+  display: flex;
+  gap: 8px;
+}
+
 .audit-result {
   flex: 1;
   background: #04070e;
@@ -524,8 +585,15 @@ button:disabled {
 }
 
 .file-item.auto-selected {
-  background: rgba(245, 158, 11, 0.16);
-  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(0, 240, 255, 0.14);
+  border: 1px solid rgba(0, 240, 255, 0.45);
+  color: #7dd3fc;
+}
+
+.file-size {
+  color: var(--muted);
+  font-size: 10px;
+  margin-left: auto;
 }
 
 .backup-card {
