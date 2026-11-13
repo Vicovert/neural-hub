@@ -207,7 +207,22 @@ function focusNodeLeftOfHud(node) {
 }
 
 function resetCamera() {
-  graph3D.cameraPosition({ x: 0, y: 0, z: 270 }, { x: 0, y: 0, z: 0 }, 900);
+  if (!graph3D) return;
+  const graphData = graph3D.graphData();
+  const coreNode = (graphData.nodes || []).find(n => n.isCore);
+  
+  if (coreNode && coreNode.x !== undefined) {
+    // Si le nœud 3D a déjà calculé ses coordonnées physiques, on se place autour de lui
+    const dist = 140;
+    graph3D.cameraPosition(
+      { x: coreNode.x, y: coreNode.y, z: coreNode.z + dist },
+      { x: coreNode.x, y: coreNode.y, z: coreNode.z },
+      900
+    );
+  } else {
+    // Repli par défaut sur l'origine du graphe
+    graph3D.cameraPosition({ x: 0, y: 0, z: 270 }, { x: 0, y: 0, z: 0 }, 900);
+  }
 }
 
 // ============================================================================
